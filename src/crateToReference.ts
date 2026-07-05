@@ -1,8 +1,7 @@
 import type { CrateReference } from "./crateTypes";
 import type { Reference } from "./types";
+import { SIN_LIMITE_PESO_KG } from "./types";
 import { bboxNativoCrate } from "./crateMeshes";
-
-const SIN_LIMITE_PESO = Number.MAX_SAFE_INTEGER;
 
 export function crateReferenceAReference(
   cr: CrateReference,
@@ -29,11 +28,11 @@ export function crateReferenceAReference(
     return {
       id: cr.id, sku: cr.sku, nombre: cr.nombre,
       unidadesPorPalet: cr.unidadesPorPack, loteMinimo: 1,
-      apilable: false,
+      apilable: cr.apilable,
       palletType: {
         id: `pt-${cr.id}`, nombre: `Bulto ${cr.sku}`,
         largoMm, anchoMm, alturaBaseMm: 0,
-        pesoMaxKg: SIN_LIMITE_PESO, pesoTaraKg: 0,
+        pesoMaxKg: SIN_LIMITE_PESO_KG, pesoTaraKg: 0,
       },
       pesoUnitarioKg: cr.pesoUnidadKg,
       alturaPaletCompletoMm: packAltoMm,
@@ -50,7 +49,7 @@ export function crateReferenceAReference(
     palletType: {
       id: `pt-${cr.id}`, nombre: `Bulto ${cr.sku}`,
       largoMm, anchoMm, alturaBaseMm: 0,
-      pesoMaxKg: cr.pesoMaxApilableKg ?? SIN_LIMITE_PESO, pesoTaraKg: 0,
+      pesoMaxKg: cr.pesoMaxApilableKg ?? SIN_LIMITE_PESO_KG, pesoTaraKg: 0,
     },
     pesoUnitarioKg: cr.pesoUnidadKg,
     alturaPaletCompletoMm: packAltoMm,

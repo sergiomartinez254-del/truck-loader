@@ -10,6 +10,9 @@
 
 import type { CrateOrderLine, CrateReference } from "./crateTypes";
 import type { PalletInstance, PalletType, Reference } from "./types";
+import { SIN_LIMITE_PESO_KG } from "./types";
+import { bboxNativoCrate } from "./crateMeshes";
+import type { Cfg } from "./crateGeometry";
 
 let contadorBulto = 0;
 function nuevoIdBulto(): string {
@@ -17,28 +20,48 @@ function nuevoIdBulto(): string {
   return `BULTO-${contadorBulto.toString().padStart(5, "0")}`;
 }
 
-const SIN_LIMITE_PESO = Number.MAX_SAFE_INTEGER;
-
 /**
- * Dimensiones y peso de UNA unidad de la referencia, incluyendo la carga
- * encima si la lleva (palet + aro se tratan como una unidad compuesta).
+ * Dimensiones y peso del PACK COMPLETO (ya multiplicado por el flejado) de
+ * una referencia. Antes esto se resolvía por unidad y se multiplicaba fuera
+ * por el flejado — lo cual funciona para el caso genérico, pero no para
+ * tipo "carga" (aros/piezas sobre un palet base real): ahí la altura del
+ * palet base es una aportación FIJA (una sola vez), y solo las láminas de
+ * encima escalan con el flejado. Mismo criterio que `crateToReference.ts`
+ * (usado por el flujo clásico), para que ambos caminos den el mismo resultado.
  */
-function unidadCompuesta(ref: CrateReference): {
-  largoMm: number;
-  anchoMm: number;
-  altoMm: number;
-  pesoKg: number;
-} {
-  if (!ref.cargaEncima) {
-    return { largoMm: ref.largoMm, anchoMm: ref.anchoMm, altoMm: ref.altoUnidadMm, pesoKg: ref.pesoUnidadKg };
+function medidasBulto(
+  ref: CrateReference,
+  referencias: Map<string, CrateReference>,
+  flejado: number
+): { largoMm: number; anchoMm: number; altoMm: number; pesoKg: number } {
+  if (ref.tipo === "carga" && ref.paletBase) {
+    const base = referencias.get(ref.paletBase);
+    if (!base) {
+      throw new Error(`La carga ${ref.sku} necesita el palet base ${ref.paletBase} cargado.`);
+    }
+    const bb = bboxNativoCrate(base.crateJson as Cfg); // cm
+    const baseAltoMm = Math.round(bb.alto * 10);
+    const baseLargoMm = Math.round(bb.largo * 10);
+    const baseAnchoMm = Math.round(bb.ancho * 10);
+    return {
+      // La huella la manda la pieza más grande (normalmente el palet base).
+      largoMm: Math.max(baseLargoMm, ref.largoMm),
+      anchoMm: Math.max(baseAnchoMm, ref.anchoMm),
+      altoMm: baseAltoMm + ref.altoUnidadMm * flejado,
+      pesoKg: Math.round(ref.pesoUnidadKg * flejado),
+    };
   }
-  const c = ref.cargaEncima;
+
+  // Caso normal, con o sin cargaEncima genérica (aro/pieza suelta que si se
+  // repite sí escala con el flejado, igual que la propia unidad).
+  const largoMm = ref.cargaEncima ? Math.max(ref.largoMm, ref.cargaEncima.largoMm) : ref.largoMm;
+  const anchoMm = ref.cargaEncima ? Math.max(ref.anchoMm, ref.cargaEncima.anchoMm) : ref.anchoMm;
+  const altoPorUnidadMm = ref.altoUnidadMm + (ref.cargaEncima?.altoMm ?? 0);
+  const pesoPorUnidadKg = ref.pesoUnidadKg + (ref.cargaEncima?.pesoKg ?? 0);
   return {
-    // La huella la manda la pieza más grande (normalmente el palet).
-    largoMm: Math.max(ref.largoMm, c.largoMm),
-    anchoMm: Math.max(ref.anchoMm, c.anchoMm),
-    altoMm: ref.altoUnidadMm + c.altoMm,
-    pesoKg: ref.pesoUnidadKg + c.pesoKg,
+    largoMm, anchoMm,
+    altoMm: altoPorUnidadMm * flejado,
+    pesoKg: Math.round(pesoPorUnidadKg * flejado),
   };
 }
 
@@ -81,9 +104,15 @@ export function construirCargaDeCajas(
       continue;
     }
 
-    const u = unidadCompuesta(ref);
-    const packAltoMm = u.altoMm * flejado;
-    const packPesoKg = Math.round(u.pesoKg * flejado);
+    let m: { largoMm: number; anchoMm: number; altoMm: number; pesoKg: number };
+    try {
+      m = medidasBulto(ref, referencias, flejado);
+    } catch (e) {
+      avisos.push(e instanceof Error ? e.message : String(e));
+      continue;
+    }
+    const packAltoMm = m.altoMm;
+    const packPesoKg = m.pesoKg;
 
     // Registrar/actualizar la Reference sintética para el packer.
     const prev = alturaMaxPorRef.get(ref.id) ?? 0;
@@ -93,10 +122,10 @@ export function construirCargaDeCajas(
       const palletType: PalletType = {
         id: `pt-${ref.id}`,
         nombre: `Bulto ${ref.sku}`,
-        largoMm: u.largoMm,
-        anchoMm: u.anchoMm,
+        largoMm: m.largoMm,
+        anchoMm: m.anchoMm,
         alturaBaseMm: 0,
-        pesoMaxKg: ref.pesoMaxApilableKg ?? SIN_LIMITE_PESO,
+        pesoMaxKg: ref.pesoMaxApilableKg ?? SIN_LIMITE_PESO_KG,
         pesoTaraKg: 0,
       };
       const reference: Reference = {

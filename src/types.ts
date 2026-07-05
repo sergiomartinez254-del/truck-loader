@@ -5,6 +5,13 @@
 // para evitar errores de coma flotante con decimales de metros.
 // ----------------------------------------------------------------------------
 
+/**
+ * Sentinela de "sin límite práctico de peso". Antes estaba duplicada como
+ * `Number.MAX_SAFE_INTEGER` en cratePacker.ts y crateToReference.ts; se
+ * centraliza aquí para que ambos ficheros usen exactamente el mismo valor.
+ */
+export const SIN_LIMITE_PESO_KG = Number.MAX_SAFE_INTEGER;
+
 /** Tipo de palet físico (europeo, americano, medio palet, etc.) */
 export interface PalletType {
   id: string;

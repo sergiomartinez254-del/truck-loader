@@ -144,6 +144,14 @@ document.getElementById("app")!.innerHTML = `
         </label>
       </div>
 
+      <!-- Persistencia local -->
+      <div class="panel">
+        <p class="auto-hint">💾 El pedido se guarda automáticamente en este navegador.</p>
+        <button class="btn-reset-todo" id="btn-reset-todo" title="Borra lo guardado en este navegador y recarga la página">
+          ↺ Borrar todo y empezar de nuevo
+        </button>
+      </div>
+
     </aside>
 
     <!-- ── Área de resultados ─────────────────────────── -->
@@ -176,6 +184,107 @@ function debounce<T extends (...args: never[]) => void>(fn: T, ms: number): T {
   return ((...a: never[]) => { clearTimeout(id); id = setTimeout(() => fn(...a), ms); }) as T;
 }
 const planAuto = debounce(planificar, 250);
+
+// ============================================================================
+// PERSISTENCIA (localStorage)
+// ============================================================================
+// Guarda el pedido, el perfil de camión, las referencias cargadas y las
+// posiciones fijadas/en espera en este navegador, para no perderlo todo con
+// un F5 accidental. No es una base de datos ni sincroniza entre
+// dispositivos: es solo continuidad de sesión en el mismo navegador.
+const STORAGE_KEY = "planificador-carga:v1";
+
+interface EstadoPersistido {
+  version: 1;
+  cantidades: Record<string, number>;
+  truckProfile: TruckProfile;
+  permitirVarios: boolean;
+  detalle3D: boolean;
+  crateRefsCrudas: CrateReference[];
+  colores: Record<string, string>;
+  stacksBloqueados: StackBloqueado[];
+  stagedStacks: StagedStack[];
+  nextStagedSlot: number;
+}
+
+function guardarEstadoInmediato() {
+  const estado: EstadoPersistido = {
+    version: 1,
+    cantidades: getCantidades(),
+    truckProfile,
+    permitirVarios,
+    detalle3D,
+    crateRefsCrudas: Array.from(crateRefsCrudas.values()),
+    colores: Object.fromEntries(colorPorRef),
+    stacksBloqueados: Array.from(stacksBloqueados.values()),
+    stagedStacks,
+    nextStagedSlot,
+  };
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(estado));
+  } catch {
+    // localStorage lleno, deshabilitado (modo privado) o no disponible:
+    // se ignora en silencio, no es crítico para el funcionamiento de la app.
+  }
+}
+const guardarEstadoDebounced = debounce(guardarEstadoInmediato, 400);
+
+/**
+ * Intenta restaurar el estado guardado en una sesión anterior. Devuelve
+ * `true` si había algo real que restaurar (para decidir si hace falta ir a
+ * buscar el catálogo por defecto al servidor o no).
+ */
+function restaurarEstadoGuardado(): boolean {
+  let crudo: string | null;
+  try {
+    crudo = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return false;
+  }
+  if (!crudo) return false;
+
+  let estado: EstadoPersistido;
+  try {
+    estado = JSON.parse(crudo);
+  } catch {
+    return false;
+  }
+  if (!estado || typeof estado !== "object") return false;
+
+  for (const cr of estado.crateRefsCrudas ?? []) {
+    crateRefsCrudas.set(cr.id, cr);
+    crateGeomPorRef.set(cr.id, cr.crateJson);
+  }
+  for (const [id, color] of Object.entries(estado.colores ?? {})) {
+    colorPorRef.set(id, color);
+  }
+  if (estado.truckProfile) truckProfile = estado.truckProfile;
+  permitirVarios = !!estado.permitirVarios;
+  detalle3D = !!estado.detalle3D;
+  for (const sb of estado.stacksBloqueados ?? []) {
+    stacksBloqueados.set(sb.stackKey, sb);
+  }
+  stagedStacks = estado.stagedStacks ?? [];
+  nextStagedSlot = estado.nextStagedSlot ?? 0;
+  Object.assign(CANTIDADES_INICIALES, estado.cantidades ?? {});
+
+  // Reflejar lo restaurado en los controles, ya pintados con los valores por
+  // defecto antes de que esto se ejecute.
+  (document.getElementById("truck-largo") as HTMLInputElement).value = String(truckProfile.largoInteriorMm / 10);
+  (document.getElementById("truck-ancho") as HTMLInputElement).value = String(truckProfile.anchoInteriorMm / 10);
+  (document.getElementById("truck-alto")  as HTMLInputElement).value = String(truckProfile.altoInteriorMm / 10);
+  (document.getElementById("truck-peso")  as HTMLInputElement).value = String(truckProfile.pesoMaxKg);
+  (document.getElementById("cb-varios")   as HTMLInputElement).checked = permitirVarios;
+  (document.getElementById("cb-detalle")  as HTMLInputElement).checked = detalle3D;
+  actualizarMeta();
+
+  return crateRefsCrudas.size > 0 || Object.keys(estado.cantidades ?? {}).length > 0;
+}
+
+function borrarEstadoGuardadoYReiniciar() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+  location.reload();
+}
 
 // ============================================================================
 // RENDER DE FILAS DEL PEDIDO
@@ -294,9 +403,14 @@ function recomponerRefs() {
 async function cargarRefsIniciales() {
   let nombres: string[] = [];
   try {
-    nombres = await (await fetch("/JsonRefs/index.json")).json();
-  } catch {
-    console.warn("No se encontro /JsonRefs/index.json");
+    const resp = await fetch("/JsonRefs/index.json");
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    nombres = await resp.json();
+  } catch (e) {
+    console.warn("No se pudo cargar /JsonRefs/index.json", e);
+    crateErrorEl.textContent = "No se pudieron cargar las referencias iniciales del catálogo. Puedes añadirlas manualmente con el botón de arriba.";
+    crateErrorEl.style.display = "block";
+    return;
   }
   for (const nombre of nombres) {
     try {
@@ -310,7 +424,13 @@ async function cargarRefsIniciales() {
   }
   recomponerRefs();
 }
-cargarRefsIniciales();
+// Si hay un pedido guardado de una sesión anterior en este navegador, se
+// restaura tal cual; si no, se va a buscar el catálogo por defecto al servidor.
+if (restaurarEstadoGuardado()) {
+  recomponerRefs();
+} else {
+  cargarRefsIniciales();
+}
 // ============================================================================
 // PERFIL CAMIÓN
 // ============================================================================
@@ -334,7 +454,13 @@ cargarRefsIniciales();
 });
 (document.getElementById("cb-detalle") as HTMLInputElement).addEventListener("change", e => {
   detalle3D = (e.target as HTMLInputElement).checked;
-  actualizarCamionActivo();
+  actualizarCamionActivo(true);
+  guardarEstadoDebounced();
+});
+
+document.getElementById("btn-reset-todo")?.addEventListener("click", () => {
+  const ok = confirm("Esto borra el pedido, las referencias cargadas y el perfil de camión guardados en este navegador, y recarga la página. ¿Seguro?");
+  if (ok) borrarEstadoGuardadoYReiniciar();
 });
 
 // ============================================================================
@@ -352,6 +478,7 @@ function leerLineas(): OrderLine[] {
 function planificar() {
   const lineas = leerLineas();
   avisosLoteEl.innerHTML = "";
+  guardarEstadoDebounced();
 
   if (lineas.length === 0 && stacksBloqueados.size === 0) {
     if (escena) { escena.destruir(); escena = null; }
@@ -496,8 +623,10 @@ function renderResultados() {
         <div class="viewer3d-stats" id="v3d-stats"></div>
         <div class="viewer3d-legend" id="v3d-legend"></div>
       </div>
-      <div class="palet-info" id="palet-info" style="display:none"></div>
-      <div class="viewer3d-canvas" id="v3d-canvas"></div>
+      <div class="viewer3d-canvas-wrap">
+        <div class="viewer3d-canvas" id="v3d-canvas"></div>
+        <div class="palet-info" id="palet-info"></div>
+      </div>
     </div>
     <div class="plan-2d" id="plan-2d">
       <div class="plan-2d__header">
@@ -542,7 +671,7 @@ function renderResultados() {
     if (!modoManual) {
       pilaSeleccionada = null;
       const infoEl = document.getElementById("palet-info");
-      if (infoEl) infoEl.style.display = "none";
+      if (infoEl) infoEl.style.visibility = "hidden";
     }
   });
 
@@ -556,10 +685,22 @@ function card(valor: string, label: string): string {
 // ============================================================================
 // ACTUALIZAR CAMIÓN ACTIVO (3D + 2D)
 // ============================================================================
-function actualizarCamionActivo() {
+function actualizarCamionActivo(mantenerSeleccion = false) {
   if (!resultado) return;
   const camion = resultado.camiones[truckIdx];
   if (!camion) return;
+
+  // Al rotar/fijar una pila queremos conservar su selección (mismo stackKey,
+  // los ids de palet no cambian). En cualquier otro caso (replan, cambio de
+  // pestaña de camión) la selección anterior ya no tiene sentido: se limpia
+  // el estado Y la tarjeta de info para que no se quede mostrando datos de
+  // una pila que ya no existe o pertenece a otro camión.
+  const stackKeyAReseleccionar = mantenerSeleccion ? pilaSeleccionada?.stackKey : undefined;
+  if (!mantenerSeleccion) {
+    pilaSeleccionada = null;
+    const infoElPrevio = document.getElementById("palet-info");
+    if (infoElPrevio) { infoElPrevio.style.visibility = "hidden"; infoElPrevio.innerHTML = ""; }
+  }
 
   // Claves de pilas bloqueadas para el camión activo
   const lockedKeys = new Set(
@@ -581,15 +722,17 @@ function actualizarCamionActivo() {
       pilaSeleccionada = info;
       const infoEl = document.getElementById("palet-info");
       if (!infoEl) return;
-      if (!info) { infoEl.style.display = "none"; return; }
+      if (!info) { infoEl.style.visibility = "hidden"; infoEl.innerHTML = ""; return; }
       const ref = catalogoCompleto().find(r => r.id === info.refId);
       const esBloqueado = info.bloqueado;
       const enEspera   = info.enEspera;
-      infoEl.style.display = "flex";
+      infoEl.style.visibility = "visible";
       infoEl.innerHTML = `
-        <div class="palet-info__color" style="background:${colorDe(info.refId)}"></div>
-        <div class="palet-info__body">
+        <div class="palet-info__header">
+          <span class="palet-info__color" style="background:${colorDe(info.refId)}"></span>
           <span class="palet-info__sku">${ref?.sku ?? info.refId} ${esBloqueado ? "🔒" : ""} ${enEspera ? "⏳" : ""}</span>
+        </div>
+        <div class="palet-info__body">
           <span class="palet-info__dims">${info.largoMm/10}×${info.anchoMm/10}×${info.alturaApilaMm/10} cm</span>
           <span class="palet-info__meta">${info.unidades} ud · ${info.niveles} nivel${info.niveles>1?"es":""} · pos. ${info.posYcm}cm, ${info.posXcm}cm</span>
           <span class="palet-info__roterror" id="palet-rot-error"></span>
@@ -602,9 +745,11 @@ function actualizarCamionActivo() {
             <button class="palet-info__btn ${esBloqueado ? "palet-info__btn--activo" : ""}" id="btn-lock-pila">
               ${esBloqueado ? "🔒 Desfijar" : "🔓 Fijar posición"}
             </button>
-            <span class="palet-info__hint">
-              ${esBloqueado ? "Posición fija — no se puede mover ni rotar" : enEspera ? "" : "Arrastra al área verde para aparcar"}
-            </span>
+            ${esBloqueado || !enEspera ? `
+              <span class="palet-info__hint">
+                ${esBloqueado ? "Posición fija — no se puede mover ni rotar" : "Arrastra al área verde para aparcar"}
+              </span>
+            ` : ""}
           </div>
         ` : ""}
       `;
@@ -643,6 +788,7 @@ function actualizarCamionActivo() {
         if (idSet.has(camion.pallets[i].id)) camion.pallets.splice(i, 1);
       }
       actualizarPlano2D(camion);
+      guardarEstadoDebounced();
     },
 
     onRecuperarDeEspera(paletIds, nuevaX, nuevaY) {
@@ -653,17 +799,26 @@ function actualizarCamionActivo() {
       paletsActualizados.forEach(p => camion.pallets.push(p));
       stagedStacks = stagedStacks.filter(s => s.id !== ss.id);
       actualizarPlano2D(camion);
+      guardarEstadoDebounced();
     },
   };
 
-  // Guardar posición de cámara antes de destruir la escena anterior
-  const cameraState = escena?.getCameraState() ?? undefined;
-
-  if (escena) { escena.destruir(); escena = null; }
+  // Reutilizar la escena existente (misma cámara, mismo renderer, sin
+  // parpadeo): solo se crea desde cero la primerísima vez, cuando todavía no
+  // hay ninguna. El contenedor del canvas se re-renderiza en cada replan
+  // (es un <div> nuevo cada vez), así que `actualizar` se encarga de
+  // reenganchar el <canvas> existente en el sitio correcto.
   const canvas = document.getElementById("v3d-canvas");
   if (canvas) {
-   escena = crearEscena3D(canvas, camion, colorPorRef, stagedInfo, lockedKeys,
-      { ...opciones, cameraState, crateGeomPorRef, crateInfoPorRef, detalle: detalle3D, rotacionVisual });
+    const opcionesCompletas: EscenaOpciones = {
+      ...opciones, crateGeomPorRef, crateInfoPorRef, detalle: detalle3D, rotacionVisual,
+      reseleccionarStackKey: stackKeyAReseleccionar,
+    };
+    if (escena) {
+      escena.actualizar(canvas, camion, stagedInfo, lockedKeys, opcionesCompletas);
+    } else {
+      escena = crearEscena3D(canvas, camion, colorPorRef, stagedInfo, lockedKeys, opcionesCompletas);
+    }
     if (modoManual) escena.setModoManual(true);
   }
 
@@ -741,8 +896,8 @@ function rotarPila(info: PaletSeleccionado) {
   }
   const stackKey = `${base.x}-${base.y}`;
   rotacionVisual.set(stackKey, !rotacionVisual.get(stackKey));
-  // Recrear escena (la cámara se conserva) y actualizar plano 2D
-  actualizarCamionActivo();
+  // Recrear escena (la cámara y la selección se conservan) y actualizar plano 2D
+  actualizarCamionActivo(true);
   actualizarPlano2D(camion);
 }
 
@@ -774,8 +929,9 @@ function toggleBloqueoPila(info: PaletSeleccionado) {
     });
   }
 
-  actualizarCamionActivo();
+  actualizarCamionActivo(true);
   renderOrderRows();
+  guardarEstadoDebounced();
 }
 
 function actualizarPlano2D(camion: TruckLoadPlan) {

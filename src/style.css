@@ -318,7 +318,8 @@ html, body {
 
 .viewer3d-top {
   display: flex; justify-content: space-between; align-items: center;
-  flex-wrap: wrap; gap: 8px; margin-bottom: 8px; flex-shrink: 0;
+  gap: 8px; margin-bottom: 8px; flex-shrink: 0;
+  min-height: 32px;
 }
 
 .viewer3d-tabs { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -343,8 +344,12 @@ html, body {
 }
 
 .viewer3d-row2 {
-  display: flex; justify-content: space-between; align-items: center;
-  flex-wrap: wrap; gap: 6px; margin-bottom: 8px; flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 28px;        /* fija: no crece con las stats ni la leyenda */
+  flex-shrink: 0;
+  overflow: hidden;    /* si algo se pasa, no empuja el canvas */
 }
 
 .viewer3d-stats {
@@ -360,10 +365,15 @@ html, body {
   font-family: var(--font-mono); font-size: 10px;
 }
 
-.viewer3d-canvas {
+.viewer3d-canvas-wrap {
+  position: relative;   /* ancla para el HUD de info de pila (.palet-info) */
   flex: 1; min-height: 0;
   border-radius: 4px; overflow: hidden;
   background: #0f1419;
+}
+
+.viewer3d-canvas {
+  position: absolute; inset: 0;
 }
 
 .viewer3d-canvas canvas { display: block; }
@@ -377,9 +387,12 @@ html, body {
 }
 
 .plan-2d__header {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 8px; flex-wrap: wrap; gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
+
 
 .plan-2d__title {
   font-family: var(--font-mono); font-size: 10px;
@@ -409,8 +422,8 @@ html, body {
 }
 
 .palet-info__actions {
-  display: flex; flex-direction: column; align-items: flex-end;
-  gap: 5px; flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: stretch;
+  gap: 6px; padding-top: 8px; border-top: 1px solid var(--line-soft);
 }
 
 .palet-info__roterror {
@@ -421,10 +434,10 @@ html, body {
 }
 
 .palet-info__btn {
-  flex-shrink: 0; white-space: nowrap;
+  width: 100%; text-align: center;
   background: var(--panel-alt); border: 1px solid var(--line);
   color: var(--text-muted); border-radius: 4px;
-  padding: 5px 10px; font-size: 11px; cursor: pointer;
+  padding: 6px 10px; font-size: 11px; cursor: pointer;
   font-family: var(--font-mono);
   transition: all 0.15s;
 }
@@ -455,27 +468,53 @@ html, body {
   color: var(--accent-teal); font-weight: 700;
 }
 
+/* ── Botón reiniciar (borrar persistencia local) ───────────────── */
+
+.btn-reset-todo {
+  width: 100%; margin-top: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  background: transparent; border: 1px solid var(--line);
+  color: var(--text-muted); padding: 7px 10px;
+  border-radius: 4px; cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-reset-todo:hover { color: var(--accent-red); border-color: var(--accent-red); }
+
 /* ── Panel de info de la pila seleccionada ─────────────────────── */
 
 .palet-info {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; flex-shrink: 0;
-  background: rgba(79,209,197,0.06);
-  border: 1px solid rgba(79,209,197,0.3);
-  border-radius: 4px;
+  /* HUD flotante sobre el canvas: al ser `absolute` no participa en el
+     flujo del layout, así que su alto (variable según el contenido) NUNCA
+     hace crecer .viewer3d-canvas-wrap ni dispara el ResizeObserver del
+     renderer → cero parpadeos del canvas al seleccionar una pila. */
+  position: absolute; top: 10px; right: 10px; z-index: 5;
+  display: flex; flex-direction: column; gap: 8px;
+  width: 230px; max-width: calc(100% - 20px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  visibility: hidden;   /* oculto por defecto */
+}
+
+.palet-info__header {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
 }
 
 .palet-info__color {
-  width: 6px; min-height: 36px; border-radius: 2px; flex-shrink: 0;
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
 }
 
 .palet-info__body {
-  display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0;
 }
 
 .palet-info__sku {
   font-family: var(--font-mono); font-size: 12px;
   color: var(--accent-teal); font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 .palet-info__dims {
@@ -484,11 +523,12 @@ html, body {
 
 .palet-info__meta {
   font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
+  line-height: 1.5; white-space: normal;
 }
 
 .palet-info__hint {
   font-family: var(--font-mono); font-size: 10px;
-  color: var(--accent-amber); white-space: nowrap;
+  color: var(--accent-amber); white-space: normal; line-height: 1.5;
 }
 
 /* ── Empty state ───────────────────────────────────────────────── */
