@@ -24,7 +24,7 @@ const CATALOGO_BASE: Reference[] = [];
 const CANTIDADES_INICIALES: Record<string, number> = {};
 // JSON del constructor por referencia cargada (para el visor 3D real futuro).
 const crateGeomPorRef = new Map<string, unknown>();
-const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number }>();
+const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean }>();
 const crateRefsCrudas = new Map<string, CrateReference>();
 
 let customRefs: Reference[] = [];
@@ -313,11 +313,12 @@ function renderOrderRows() {
     const raw = cant[ref.id] ?? CANTIDADES_INICIALES[ref.id] ?? 0;
     const v   = locked > 0 ? Math.max(raw, locked) : raw;
     const esCustom = customRefs.some(r => r.id === ref.id);
+    const esDesmontado = crateInfoPorRef.get(ref.id)?.esDesmontado;
     return `
       <div class="order-row" data-refid="${ref.id}">
         <div class="order-row__color" style="background:${colorDe(ref.id)}"></div>
         <div class="order-row__info">
-          <span class="order-row__sku">${ref.sku}${locked > 0 ? ` <span class="lock-badge" title="${locked} ud fijadas">🔒</span>` : ""}</span>
+          <span class="order-row__sku">${ref.sku}${locked > 0 ? ` <span class="lock-badge" title="${locked} ud fijadas">🔒</span>` : ""}${esDesmontado ? ` <span class="lock-badge" title="Se transporta desmontada (paneles planos)">📦</span>` : ""}</span>
           <span class="order-row__nombre">${ref.nombre}</span>
           <span class="order-row__detalle">${ref.unidadesPorPalet}ud/pal · lote≥${ref.loteMinimo} · ${ref.palletType.largoMm/10}×${ref.palletType.anchoMm/10}×${ref.alturaPaletCompletoMm/10}cm${ref.apilable?"":" · NO apilable"}</span>
         </div>
@@ -392,6 +393,7 @@ function recomponerRefs() {
       crateInfoPorRef.set(cr.id, {
         tipo: cr.tipo, paletBase: cr.paletBase, unidades: cr.unidadesPorPack,
         laminaAltoMm: cr.altoUnidadMm, laminaLargoCm: cr.largoMm / 10, laminaAnchoCm: cr.anchoMm / 10,
+        esDesmontado: !!cr.desmontado,
       });
     } catch (e) {
       console.warn(e);

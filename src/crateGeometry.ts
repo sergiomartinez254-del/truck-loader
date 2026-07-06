@@ -221,7 +221,7 @@ export function buildConfig(s: Cfg): Cfg {
     useRecuadrosTestero: useTesteros && useLlapasasTestero && useRecuadrosTestero && !useLlapInclinadaTestero, recuadroTesteroClaro: g(s.recuadroTesteroClaro, 65),
     useLlapasasTapa: useTapa && useLlapasasTapa,
     useRecuadrosTapa: useTapa && useLlapasasTapa && useRecuadrosTapa, recuadroTapaClaro: g(s.recuadroTapaClaro, 65),
-    llapTapaOrient: g(s.llapTapaOrient, "largo"), llapTapaAncho: g(s.llapTapaAncho, 8), llapTapaGrosor, llapTapaPosicion,
+    llapTapaOrient: g(s.llapTapaOrient, "largo"), llapTapaAncho: g(s.llapTapaAncho, 8), llapTapaGrosor, llapTapaClaro: g(s.llapTapaClaro, 65), llapTapaPosicion,
     llapIntLargo, llapIntAncho, llapIntAlto,
     llapInclinadaLadoCount: g(s.llapInclinadaLadoCount, 2), llapInclinadaTesteroCount: g(s.llapInclinadaTesteroCount, 2),
     llapLadoAltura: g(s.llapLadoAltura, "estandar"), llapTesteroAltura: g(s.llapTesteroAltura, "estandar"),

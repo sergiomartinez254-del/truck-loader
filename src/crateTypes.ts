@@ -26,6 +26,15 @@ export interface CrateCargaEncima {
 }
 
 /**
+ * Medidas del bulto CUANDO SE TRANSPORTA DESMONTADO (caja/jaula plegada en
+ * paneles planos apilados sobre la base, en vez de montada en su forma final).
+ * El planificador las calcula él mismo a partir de la geometría real (`crate`)
+ * — ver `calcularDesmontado` en crateAdapter.ts — nunca se exportan como
+ * número fijo, para que no puedan desincronizarse de lo que de verdad se
+ * dibuja ni de la altura que reserva el camión.
+ */
+
+/**
  * Ficha logística que el constructor escribe al exportar. Medidas en cm de UNA
  * unidad (no del pack). El flejado (unidadesPorPack) multiplica la altura y el
  * peso al construir el bulto físico.
@@ -48,6 +57,15 @@ export interface CrateReferenceMeta {
   pesoMaxApilableKg?: number;
   /** Si la referencia va sobre un palet + carga encima. */
   cargaEncima?: CrateCargaEncima | null;
+  /**
+   * Marca si esta referencia (caja/jaula) se transporta DESMONTADA (paneles
+   * planos apilados sobre la base) en vez de montada. Solo es un sí/no: las
+   * medidas del bulto desmontado las calcula el propio planificador a partir
+   * de `crate` (la misma geometría que dibuja "Detalle 3D"), no se exportan
+   * aquí — así nunca pueden quedarse desactualizadas si el criterio de
+   * tumbado/apilado cambia más adelante.
+   */
+  desmontado?: boolean;
 }
 
 /** Envoltorio completo exportado por el constructor. */
@@ -79,6 +97,12 @@ export interface CrateReference {
   pesoMaxApilableKg: number | null;
   /** Carga encima ya normalizada a mm (null si no aplica). */
   cargaEncima: { largoMm: number; anchoMm: number; altoMm: number; pesoKg: number } | null;
+  /**
+   * Medidas del bulto desmontado, ya normalizadas a mm (null = se transporta
+   * montada). Cuando existen, sustituyen a largoMm/anchoMm/altoUnidadMm a la
+   * hora de calcular el hueco que ocupa en el camión.
+   */
+  desmontado: { largoMm: number; anchoMm: number; altoMm: number } | null;
   /** JSON crudo del constructor, para el visor 3D futuro. */
   crateJson: unknown;
 }

@@ -56,7 +56,7 @@ export interface EscenaOpciones {
   onMoverCamion?: (paletIds: string[], nuevaX: number, nuevaY: number) => void;
   onEnviarEspera?: (paletIds: string[]) => void;
   crateGeomPorRef?: Map<string, unknown>;
-  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number }>;
+  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean }>;
   rotacionVisual?: Map<string, boolean>;
   detalle?: boolean;
   onRecuperarDeEspera?: (paletIds: string[], nuevaX: number, nuevaY: number) => void;
@@ -303,7 +303,7 @@ export function crearEscena3D(
 
       const info = crateInfoPorRef?.get(sd.refId);
       const esCarga = info?.tipo === "carga";
-       const geomPalet = detalle
+      const geomPalet = detalle
         ? (esCarga && info?.paletBase ? crateGeomPorRef?.get(info.paletBase) : crateGeomPorRef?.get(sd.refId))
         : null;
       const pt = paletsPila[0].palletType;
@@ -377,6 +377,7 @@ export function crearEscena3D(
           if (geomPalet) {
             const cm = construirMeshCrate(THREE, geomPalet, {
               colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotado, escala: ESCALA,
+              desmontado: !!info?.esDesmontado,
             });
             registrarRecursosDe(cm);
             cm.position.set(largoEsc / 2, localY + altUnd * i, anchoEsc / 2);

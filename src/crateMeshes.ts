@@ -11,22 +11,27 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { computePiecesFromState, buildConfig, computePieces, type Cfg } from "./crateGeometry";
-import { piezasABoxes, bboxDeBoxes, type CajaAABB, type BBox } from "./crateNormalize";
+import { piezasABoxes, bboxDeBoxes, desmontarBoxes, type CajaAABB, type BBox } from "./crateNormalize";
 
 interface CacheEntry { boxes: CajaAABB[]; bbox: BBox; }
+// Cachés separadas: la geometría montada y la desmontada son formas distintas
+// del mismo crateJson, así que no pueden compartir entrada de caché.
 const cache = new WeakMap<object, CacheEntry>();
+const cacheDesmontado = new WeakMap<object, CacheEntry>();
 
-function geomDeCrate(crateJson: Cfg): CacheEntry {
+function geomDeCrate(crateJson: Cfg, desmontado = false): CacheEntry {
+  const store = desmontado ? cacheDesmontado : cache;
   if (crateJson && typeof crateJson === "object") {
-    const hit = cache.get(crateJson as object);
+    const hit = store.get(crateJson as object);
     if (hit) return hit;
   }
   const cfg = buildConfig(crateJson);
   const pieces = computePieces(cfg);
-  const boxes = piezasABoxes(pieces, cfg);
+  let boxes = piezasABoxes(pieces, cfg);
+  if (desmontado) boxes = desmontarBoxes(boxes);
   const bbox = bboxDeBoxes(boxes);
   const entry: CacheEntry = { boxes, bbox };
-  if (crateJson && typeof crateJson === "object") cache.set(crateJson as object, entry);
+  if (crateJson && typeof crateJson === "object") store.set(crateJson as object, entry);
   return entry;
 }
 
@@ -49,6 +54,11 @@ export interface OpcionesMeshCrate {
   escala: number;
   /** Carga encima: N láminas con su huella y alto reales (cm). */
   cargaEncima?: { unidades: number; laminaLargoCm: number; laminaAnchoCm: number; laminaAltoCm: number };
+  /**
+   * Si es true, dibuja lado/testero/tapa tumbados y apilados sobre la base
+   * (bulto tal y como se transporta desmontado) en vez de la caja montada.
+   */
+  desmontado?: boolean;
 }
 
 /** Geometrías y materiales creados en una llamada a construirMeshCrate, para
@@ -64,7 +74,7 @@ export function construirMeshCrate(
   crateJson: Cfg,
   opts: OpcionesMeshCrate
 ): any {
-  const { boxes, bbox } = geomDeCrate(crateJson);
+  const { boxes, bbox } = geomDeCrate(crateJson, opts.desmontado ?? false);
   const group = new THREE.Group();
   const geomsCreadas: any[] = [];
   const matsCreadas: any[] = [];
@@ -151,8 +161,11 @@ export function construirMeshCrate(
 
 // Reexport por comodidad
 export { computePiecesFromState };
-/** Dimensiones nativas de la caja (cm) a partir de su JSON, sin escalar. */
-export function bboxNativoCrate(crateJson: Cfg): { largo: number; ancho: number; alto: number } {
-  const { bbox } = geomDeCrate(crateJson);
+/** Dimensiones nativas de la caja (cm) a partir de su JSON, sin escalar.
+ * Con `desmontado=true`, devuelve las del bulto tumbado y apilado en vez de
+ * las de la caja montada (mismo cálculo que usa "Detalle 3D" para dibujarlo,
+ * así que nunca puede desincronizarse de lo que de verdad se ve). */
+export function bboxNativoCrate(crateJson: Cfg, desmontado = false): { largo: number; ancho: number; alto: number } {
+  const { bbox } = geomDeCrate(crateJson, desmontado);
   return { largo: bbox.largo, ancho: bbox.ancho, alto: bbox.alto };
 }

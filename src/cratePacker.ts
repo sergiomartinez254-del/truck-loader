@@ -52,8 +52,18 @@ function medidasBulto(
     };
   }
 
-  // Caso normal, con o sin cargaEncima genérica (aro/pieza suelta que si se
-  // repite sí escala con el flejado, igual que la propia unidad).
+  // Caso normal: si se transporta desmontada, sus medidas (huella + alto del
+  // apilado de paneles planos) mandan sobre las de la caja montada. Si no,
+  // con o sin cargaEncima genérica (aro/pieza suelta que si se repite sí
+  // escala con el flejado, igual que la propia unidad).
+  if (ref.desmontado) {
+    return {
+      largoMm: ref.desmontado.largoMm,
+      anchoMm: ref.desmontado.anchoMm,
+      altoMm: ref.desmontado.altoMm * flejado,
+      pesoKg: Math.round(ref.pesoUnidadKg * flejado),
+    };
+  }
   const largoMm = ref.cargaEncima ? Math.max(ref.largoMm, ref.cargaEncima.largoMm) : ref.largoMm;
   const anchoMm = ref.cargaEncima ? Math.max(ref.anchoMm, ref.cargaEncima.anchoMm) : ref.anchoMm;
   const altoPorUnidadMm = ref.altoUnidadMm + (ref.cargaEncima?.altoMm ?? 0);

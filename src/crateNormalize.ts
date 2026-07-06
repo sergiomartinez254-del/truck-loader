@@ -149,3 +149,196 @@ export function bboxDeBoxes(boxes: CajaAABB[]): BBox {
     largo: maxX - minX, alto: maxY - minY, ancho: maxZ - minZ,
   };
 }
+
+// ============================================================================
+// Desmontado: tumba lado(s)/testero(s)/tapa y los apila planos sobre la base
+// ============================================================================
+// Mismo criterio geométrico que `aplicarVistaDesmontada` en el constructor:
+// la base (rastrel/db/taco/intermedia/tablon/cubrir/orilla/tapaboca/taco
+// arrastre/recuadro) se queda montada tal cual. El lado gira sobre el eje
+// largo (su alto pasa a ser huella en el eje ancho; su grosor pasa a ser la
+// altura que aporta al apilado). El testero gira sobre el eje ancho (su alto
+// pasa a ser huella en el eje largo; su grosor aporta altura). La tapa ya
+// está tumbada, solo baja a su sitio en el apilado.
+//
+// LIMITACIÓN: igual que el resto del visor de detalle del planificador, esto
+// no incluye llapasas/recuadros/refuerzos — `piezasABoxes` ya no los genera
+// (ver `isWall`/el switch de arriba), solo los paneles estructurales
+// (paredes, tapa, base). Es la misma limitación que ya tenía la caja montada
+// aquí, no una nueva.
+// ----------------------------------------------------------------------------
+
+const LADO_LAYERS = new Set(["lado-plancha", "lado-tabla", "llap-lado", "llap-incl-lado", "rec-lado"]);
+const TESTERO_LAYERS = new Set(["testero-plancha", "testero-tabla", "llap-testero", "llap-incl-testero", "rec-testero"]);
+const TAPA_LAYERS = new Set(["tapa-plancha", "tapa-tabla", "llap-tapa", "rec-tapa", "cuadradillo"]);
+
+/**
+ * Puntales y barrotes de refuerzo son postes/tablas verticales que suben
+ * desde la base casi hasta la tapa — no "pertenecen" limpiamente a un único
+ * panel plano al desmontar (no se tumban bien: son largos y finos, no
+ * anchos y delgados como una pared). Para no inflar por error la altura de
+ * la base (el mismo bug que tenían las llapasas), se excluyen del dibujo en
+ * modo desmontado en vez de dejarlos mal clasificados.
+ */
+const IGNORAR_EN_DESMONTADO = new Set(["puntal", "barrote-ref"]);
+
+/** El id de cada pieza lleva el índice de cara justo detrás ("lado-0",
+ * "testero-1-tabla-3"...). Hace falta para tumbar cada lado/testero POR
+ * SEPARADO: si se tratan juntos, la unión de sus dos cajas mide el hueco
+ * ENTERO entre ambos (el ancho de la caja), no el grosor de un panel. */
+function parteLadoTestero(id: string): number | null {
+  const m = /(?:lado|testero)-(\d)/.exec(id);
+  return m ? Number(m[1]) : null;
+}
+
+interface RangoBox {
+  minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number;
+}
+
+function rangoDe(boxes: CajaAABB[]): RangoBox | null {
+  if (!boxes.length) return null;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const b of boxes) {
+    if (b.x0 < minX) minX = b.x0; if (b.x1 > maxX) maxX = b.x1;
+    if (b.y0 < minY) minY = b.y0; if (b.y1 > maxY) maxY = b.y1;
+    if (b.z0 < minZ) minZ = b.z0; if (b.z1 > maxZ) maxZ = b.z1;
+  }
+  return { minX, maxX, minY, maxY, minZ, maxZ };
+}
+
+// LIMITACIÓN: puntales y barrotes de refuerzo no se dibujan en modo
+// desmontado (ver IGNORAR_EN_DESMONTADO más arriba) — el resto de piezas
+// estructurales (paredes con sus llapasas/recuadros, tapa, base) sí.
+//
+// OPTIMIZACIÓN DE ALTURA: los 2 lados SIEMPRE se apilan uno encima del otro
+// (misma huella, son el mismo panel por duplicado) — igual los 2 testeros
+// entre sí. Es ese conjunto ya apilado ("bloque lado", "bloque testero"), no
+// cada panel suelto, el que luego se intenta colocar uno al lado del otro en
+// la misma capa (girando en planta el que haga falta) cuando la pared (alto)
+// es pequeña frente al largo/ancho de la base y caben sin pisarse — y solo si
+// eso NO hace crecer la huella que ya establece la base/tapa. Si no caben
+// juntos, cada bloque va en su propia capa.
+export function desmontarBoxes(boxesOriginales: CajaAABB[]): CajaAABB[] {
+  const boxes = boxesOriginales.filter(b => !IGNORAR_EN_DESMONTADO.has(b.layer));
+  const esLado = (b: CajaAABB) => LADO_LAYERS.has(b.layer);
+  const esTestero = (b: CajaAABB) => TESTERO_LAYERS.has(b.layer);
+  const esTapa = (b: CajaAABB) => TAPA_LAYERS.has(b.layer);
+  const esBase = (b: CajaAABB) => !esLado(b) && !esTestero(b) && !esTapa(b);
+
+  const baseBoxes = boxes.filter(esBase);
+  const rangoBase = rangoDe(baseBoxes);
+  if (!rangoBase) return boxes; // sin base (no debería pasar), se deja tal cual
+
+  const resultado: CajaAABB[] = [...baseBoxes];
+  let stackY = rangoBase.maxY;
+  const largoBase = rangoBase.maxX - rangoBase.minX;
+  const anchoBase = rangoBase.maxZ - rangoBase.minZ;
+
+  interface Preparado {
+    cajas: CajaAABB[];   // ya tumbadas, con Y normalizado a partir de 0
+    grosor: number;      // extensión en Y (lo que aporta al apilado)
+    footprintX: number;
+    footprintZ: number;
+  }
+
+  // Tumba un grupo (ya filtrado a un único lado/testero, o la tapa entera):
+  // gira las cajas (lado sobre el eje largo, testero sobre el eje ancho,
+  // tapa sin girar) y normaliza los TRES ejes a partir de 0 — la posición
+  // final (anclada a la esquina real de la base, más la capa y el posible
+  // desplazamiento por compartir capa) se decide después, en `colocar`.
+  const prepararGrupo = (grupo: CajaAABB[], eje: "x" | "z" | null): Preparado | null => {
+    if (!grupo.length) return null;
+    const r = rangoDe(grupo)!;
+    const cajas = grupo.map((b): CajaAABB => {
+      if (eje === "x") {
+        // Lado: alto (Y) → huella en Z; grosor (Z) → altura de apilado.
+        return { ...b, x0: b.x0 - r.minX, x1: b.x1 - r.minX, y0: b.z0 - r.minZ, y1: b.z1 - r.minZ, z0: b.y0 - r.minY, z1: b.y1 - r.minY };
+      } else if (eje === "z") {
+        // Testero: alto (Y) → huella en X; grosor (X) → altura de apilado.
+        return { ...b, x0: b.y0 - r.minY, x1: b.y1 - r.minY, y0: b.x0 - r.minX, y1: b.x1 - r.minX, z0: b.z0 - r.minZ, z1: b.z1 - r.minZ };
+      }
+      // Tapa: ya tumbada, solo se normalizan sus tres ejes a partir de 0.
+      return { ...b, x0: b.x0 - r.minX, x1: b.x1 - r.minX, y0: b.y0 - r.minY, y1: b.y1 - r.minY, z0: b.z0 - r.minZ, z1: b.z1 - r.minZ };
+    });
+    const rt = rangoDe(cajas)!;
+    return { cajas, grosor: rt.maxY - rt.minY, footprintX: rt.maxX - rt.minX, footprintZ: rt.maxZ - rt.minZ };
+  };
+
+  /** Apila B directamente encima de A: misma huella X/Z (ambos ya
+   * normalizados a partir de 0,0), solo cambia Y. Así se combinan siempre
+   * los dos lados entre sí, y los dos testeros entre sí. */
+  const apilarPareja = (a: Preparado | null, b: Preparado | null): Preparado | null => {
+    if (!a) return b;
+    if (!b) return a;
+    return {
+      cajas: [...a.cajas, ...b.cajas.map(c => ({ ...c, y0: c.y0 + a.grosor, y1: c.y1 + a.grosor }))],
+      grosor: a.grosor + b.grosor,
+      footprintX: Math.max(a.footprintX, b.footprintX),
+      footprintZ: Math.max(a.footprintZ, b.footprintZ),
+    };
+  };
+
+  /** Gira un bloque ya tumbado 90° EN PLANTA (sobre el eje vertical): cambia
+   * cuál de sus dos dimensiones horizontales queda a lo largo o a lo ancho.
+   * Necesario para alinear el bloque testero con el bloque lado cuando se
+   * colocan juntos en la misma capa. */
+  const girarEnPlanta = (p: Preparado): Preparado => ({
+    grosor: p.grosor, footprintX: p.footprintZ, footprintZ: p.footprintX,
+    cajas: p.cajas.map(b => ({ ...b, x0: b.z0, x1: b.z1, z0: b.x0, z1: b.x1 })),
+  });
+
+  /** Añade un bloque ya preparado al resultado, en la capa `y`, anclado a la
+   * esquina real de la base (para que no quede flotando en su propio marco
+   * normalizado a partir de 0), con un desplazamiento opcional en X/Z para
+   * convivir con otro bloque en la misma capa sin pisarse. */
+  const colocar = (p: Preparado, y: number, offsetX = 0, offsetZ = 0) => {
+    for (const b of p.cajas) {
+      resultado.push({
+        ...b,
+        x0: b.x0 + offsetX + rangoBase.minX, x1: b.x1 + offsetX + rangoBase.minX,
+        y0: b.y0 + y,                        y1: b.y1 + y,
+        z0: b.z0 + offsetZ + rangoBase.minZ, z1: b.z1 + offsetZ + rangoBase.minZ,
+      });
+    }
+  };
+
+  const tapaPrep = prepararGrupo(boxes.filter(esTapa), null);
+  const lado0Prep = prepararGrupo(boxes.filter(b => esLado(b) && parteLadoTestero(b.id) === 0), "x");
+  const lado1Prep = prepararGrupo(boxes.filter(b => esLado(b) && parteLadoTestero(b.id) === 1), "x");
+  const testero0Prep = prepararGrupo(boxes.filter(b => esTestero(b) && parteLadoTestero(b.id) === 0), "z");
+  const testero1Prep = prepararGrupo(boxes.filter(b => esTestero(b) && parteLadoTestero(b.id) === 1), "z");
+
+  if (tapaPrep) { colocar(tapaPrep, stackY); stackY += tapaPrep.grosor; }
+
+  // Los 2 lados siempre juntos, uno encima del otro; igual los 2 testeros.
+  const bloqueLado = apilarPareja(lado0Prep, lado1Prep);
+  const bloqueTestero = apilarPareja(testero0Prep, testero1Prep);
+
+  if (bloqueLado && bloqueTestero) {
+    // El alto de pared debería coincidir en ambos bloques; se coge el mayor
+    // para el chequeo de encaje, por seguridad ante cualquier asimetría.
+    const alto = Math.max(bloqueLado.footprintZ, bloqueTestero.footprintX);
+    const combinaCabe = alto > 0 && 2 * alto <= Math.min(largoBase, anchoBase);
+    if (combinaCabe) {
+      if (anchoBase <= largoBase) {
+        colocar(bloqueLado, stackY, 0, 0);
+        const testeroGirado = girarEnPlanta(bloqueTestero);
+        colocar(testeroGirado, stackY, 0, bloqueLado.footprintZ);
+      } else {
+        const ladoGirado = girarEnPlanta(bloqueLado);
+        colocar(ladoGirado, stackY, 0, 0);
+        colocar(bloqueTestero, stackY, ladoGirado.footprintX, 0);
+      }
+      stackY += Math.max(bloqueLado.grosor, bloqueTestero.grosor);
+    } else {
+      colocar(bloqueLado, stackY); stackY += bloqueLado.grosor;
+      colocar(bloqueTestero, stackY); stackY += bloqueTestero.grosor;
+    }
+  } else if (bloqueLado) {
+    colocar(bloqueLado, stackY); stackY += bloqueLado.grosor;
+  } else if (bloqueTestero) {
+    colocar(bloqueTestero, stackY); stackY += bloqueTestero.grosor;
+  }
+
+  return resultado;
+}

@@ -12,6 +12,8 @@ import type {
   CrateReferenceMeta,
   CrateWrapper,
 } from "./crateTypes";
+import { bboxNativoCrate } from "./crateMeshes";
+import type { Cfg } from "./crateGeometry";
 
 const cmAmm = (cm: number) => Math.round(cm * 10);
 
@@ -37,6 +39,26 @@ function normalizarCargaEncima(c: CrateCargaEncima | null | undefined): CrateRef
     altoMm: cmAmm(c.altoCm),
     pesoKg: c.pesoKg,
   };
+}
+
+/**
+ * Calcula las medidas del bulto DESMONTADO (paneles tumbados y apilados
+ * sobre la base) directamente de la geometría real del crate — el mismo
+ * cálculo que usa "Detalle 3D" para dibujarlo. Así solo hay una fuente de
+ * verdad: nunca puede desincronizarse un número exportado del constructor
+ * de lo que el planificador realmente calcula y dibuja.
+ * Devuelve null si la geometría no es válida (se trata como "se transporta
+ * montada" en vez de bloquear la carga de la referencia).
+ */
+function calcularDesmontado(crateJson: unknown): CrateReference["desmontado"] {
+  if (crateJson == null || typeof crateJson !== "object") return null;
+  try {
+    const { largo, ancho, alto } = bboxNativoCrate(crateJson as Cfg, true);
+    if (!numPos(largo) || !numPos(ancho) || !numPos(alto)) return null;
+    return { largoMm: cmAmm(largo), anchoMm: cmAmm(ancho), altoMm: cmAmm(alto) };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -76,6 +98,7 @@ export function crateWrapperAReferencia(wrapper: CrateWrapper): CrateReference {
   }
 
   const cargaEncima = normalizarCargaEncima(meta.cargaEncima);
+  const desmontado = meta.desmontado === true ? calcularDesmontado(wrapper.crate) : null;
 
   const pesoMaxApilableKg =
     meta.pesoMaxApilableKg == null
@@ -98,6 +121,7 @@ export function crateWrapperAReferencia(wrapper: CrateWrapper): CrateReference {
     pesoUnidadKg: meta.pesoUnidadKg,
     pesoMaxApilableKg,
     cargaEncima,
+    desmontado,
     crateJson: wrapper.crate ?? null,
   };
 }

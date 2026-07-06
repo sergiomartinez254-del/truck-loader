@@ -39,9 +39,13 @@ export function crateReferenceAReference(
     };
   }
 
-  // Caso normal (palet/caja/jaula)
-  const largoMm = cr.largoMm, anchoMm = cr.anchoMm;
-  const packAltoMm = Math.round(cr.altoUnidadMm * cr.unidadesPorPack);
+  // Caso normal (palet/caja/jaula): si se transporta desmontada, sus medidas
+  // (huella + alto del apilado de paneles planos) mandan sobre las de la caja
+  // ya montada — es lo que de verdad ocupa en el camión.
+  const largoMm = cr.desmontado?.largoMm ?? cr.largoMm;
+  const anchoMm = cr.desmontado?.anchoMm ?? cr.anchoMm;
+  const altoUnidadMm = cr.desmontado?.altoMm ?? cr.altoUnidadMm;
+  const packAltoMm = Math.round(altoUnidadMm * cr.unidadesPorPack);
   return {
     id: cr.id, sku: cr.sku, nombre: cr.nombre,
     unidadesPorPalet: cr.unidadesPorPack, loteMinimo: 1,
