@@ -4,8 +4,8 @@
 // Port adaptado de `normalizePieces` (exportPDF). Convierte cada pieza al
 // rectángulo 3D { layer, x0,y0,z0, x1,y1,z1 } en el espacio de la caja
 // (X=largo, Y=alto con suelo en 0, Z=ancho; centrado en X/Z).
-// Las piezas inclinadas (llap-incl-*) se aproximan por su AABB: para carga en
-// camión el bulto se ve completo igualmente y evita rotaciones complejas.
+// Las piezas inclinadas (llap-incl-*) se convierten a su caja envolvente ya
+// rotada (rotZ/rotX incluida) — no una aproximación sin rotar.
 // ----------------------------------------------------------------------------
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -17,6 +17,17 @@ export interface CajaAABB {
   id: string;
   x0: number; y0: number; z0: number;
   x1: number; y1: number; z1: number;
+  /**
+   * Presente SOLO en piezas inclinadas (llap-incl-*): su forma real (centro
+   * + dimensiones LOCALES sin rotar + eje/ángulo de giro), para que el
+   * render de "Detalle 3D" (caja MONTADA) pueda dibujar el tablero
+   * realmente inclinado en vez de un bloque recto del tamaño de su caja
+   * envolvente. x0..z1 siguen siendo la caja envolvente ya rotada (para
+   * bbox/huecos/desmontado, que si necesitan un AABB de verdad).
+   * `desmontarBoxes` retira este campo al tumbar la pieza (deja de ser
+   * válido una vez reposicionada como panel plano).
+   */
+  rot?: { axis: "x" | "z"; angle: number; cx: number; cy: number; cz: number; w: number; h: number; d: number };
 }
 
 function isWall(l: string): boolean {
@@ -29,11 +40,15 @@ export function piezasABoxes(pieces: Piece[], cfg: Cfg): CajaAABB[] {
   const bLargo = cfg.baseLargo || largo, bAncho = cfg.baseAncho || ancho;
   const out: CajaAABB[] = [];
 
-  const push = (layer: string, id: string, X0: number, Y0: number, Z0: number, X1: number, Y1: number, Z1: number) => {
+  const push = (
+    layer: string, id: string, X0: number, Y0: number, Z0: number, X1: number, Y1: number, Z1: number,
+    rot?: CajaAABB["rot"],
+  ) => {
     out.push({
       layer, id,
       x0: Math.min(X0, X1), y0: Math.min(Y0, Y1), z0: Math.min(Z0, Z1),
       x1: Math.max(X0, X1), y1: Math.max(Y0, Y1), z1: Math.max(Z0, Z1),
+      ...(rot ? { rot } : {}),
     });
   };
 
@@ -47,9 +62,21 @@ export function piezasABoxes(pieces: Piece[], cfg: Cfg): CajaAABB[] {
     // Piezas con w/h/d explícitos (llapasas, rec, inclinadas)
     if (p.w != null) {
       if (p.cx != null) {
-        // Inclinada → AABB alrededor del centro (aprox. por w/h/d sin rotar)
-        const hw = p.w / 2, hh = p.h / 2, hd = p.d / 2;
-        push(l, p.id, ox + p.cx - hw, p.cy - hh, oz + p.cz - hd, ox + p.cx + hw, p.cy + hh, oz + p.cz + hd);
+        // Inclinada: caja rotada de verdad (rotZ en lado mezcla w/h en el
+        // plano X-Y; rotX en testero mezcla h/d en el plano Y-Z), no una
+        // aproximación sin rotar — si no, la altura/huella salían por
+        // debajo de lo real en cuanto la pieza tenía inclinación.
+        const esTestero = l === "llap-incl-testero";
+        const theta = esTestero ? (p.rotX || 0) : (p.rotZ || 0);
+        const cosT = Math.abs(Math.cos(theta)), sinT = Math.abs(Math.sin(theta));
+        const hw = esTestero ? p.w / 2 : (p.w * cosT + p.h * sinT) / 2;
+        const hh = esTestero ? (p.h * cosT + p.d * sinT) / 2 : (p.w * sinT + p.h * cosT) / 2;
+        const hd = esTestero ? (p.h * sinT + p.d * cosT) / 2 : p.d / 2;
+        push(l, p.id, ox + p.cx - hw, p.cy - hh, oz + p.cz - hd, ox + p.cx + hw, p.cy + hh, oz + p.cz + hd, {
+          axis: esTestero ? "x" : "z", angle: theta,
+          cx: ox + p.cx, cy: p.cy, cz: oz + p.cz,
+          w: p.w, h: p.h, d: p.d,
+        });
         continue;
       }
       // Cuadradillos: marco base (bLargo/bAncho); resto usa pLargo/pAncho
@@ -250,15 +277,18 @@ export function desmontarBoxes(boxesOriginales: CajaAABB[]): CajaAABB[] {
     if (!grupo.length) return null;
     const r = rangoDe(grupo)!;
     const cajas = grupo.map((b): CajaAABB => {
+      // rot describe la pieza en su posición ORIGINAL (montada) — tras
+      // tumbarla/reposicionarla aquí deja de ser válida, se retira.
+      const { rot: _rot, ...sinRot } = b;
       if (eje === "x") {
         // Lado: alto (Y) → huella en Z; grosor (Z) → altura de apilado.
-        return { ...b, x0: b.x0 - r.minX, x1: b.x1 - r.minX, y0: b.z0 - r.minZ, y1: b.z1 - r.minZ, z0: b.y0 - r.minY, z1: b.y1 - r.minY };
+        return { ...sinRot, x0: b.x0 - r.minX, x1: b.x1 - r.minX, y0: b.z0 - r.minZ, y1: b.z1 - r.minZ, z0: b.y0 - r.minY, z1: b.y1 - r.minY };
       } else if (eje === "z") {
         // Testero: alto (Y) → huella en X; grosor (X) → altura de apilado.
-        return { ...b, x0: b.y0 - r.minY, x1: b.y1 - r.minY, y0: b.x0 - r.minX, y1: b.x1 - r.minX, z0: b.z0 - r.minZ, z1: b.z1 - r.minZ };
+        return { ...sinRot, x0: b.y0 - r.minY, x1: b.y1 - r.minY, y0: b.x0 - r.minX, y1: b.x1 - r.minX, z0: b.z0 - r.minZ, z1: b.z1 - r.minZ };
       }
       // Tapa: ya tumbada, solo se normalizan sus tres ejes a partir de 0.
-      return { ...b, x0: b.x0 - r.minX, x1: b.x1 - r.minX, y0: b.y0 - r.minY, y1: b.y1 - r.minY, z0: b.z0 - r.minZ, z1: b.z1 - r.minZ };
+      return { ...sinRot, x0: b.x0 - r.minX, x1: b.x1 - r.minX, y0: b.y0 - r.minY, y1: b.y1 - r.minY, z0: b.z0 - r.minZ, z1: b.z1 - r.minZ };
     });
     const rt = rangoDe(cajas)!;
     return { cajas, grosor: rt.maxY - rt.minY, footprintX: rt.maxX - rt.minX, footprintZ: rt.maxZ - rt.minZ };

@@ -90,6 +90,7 @@ export function buildConfig(s: Cfg): Cfg {
   const llapLadoPosicion = g(s.llapLadoPosicion, "exterior");
   const useLlapInclinadaLado = g(s.useLlapInclinadaLado, false);
   const useRecuadrosLado = g(s.useRecuadrosLado, false);
+  const llapInclinadaLadoClavada = g(s.llapInclinadaLadoClavada, false);
 
   const useLlapasasTestero = g(s.useLlapasasTestero, false);
   const llapTesteroOrient = g(s.llapTesteroOrient, "largo");
@@ -97,6 +98,7 @@ export function buildConfig(s: Cfg): Cfg {
   const llapTesteroPosicion = g(s.llapTesteroPosicion, "exterior");
   const useLlapInclinadaTestero = g(s.useLlapInclinadaTestero, false);
   const useRecuadrosTestero = g(s.useRecuadrosTestero, false);
+  const llapInclinadaTesteroClavada = g(s.llapInclinadaTesteroClavada, false);
 
   const useLlapasasTapa = g(s.useLlapasasTapa, false);
   const llapTapaPosicion = g(s.llapTapaPosicion, "exterior");
@@ -129,8 +131,10 @@ export function buildConfig(s: Cfg): Cfg {
   const effectiveUseIntermedias = apoyoType === "tacos" && useTablones && useIntermedias;
   const effectiveRastrelOrient = apoyoType === "dobleBase" ? flip(dbOrient) : rastrelOrient;
 
-  const llapLadoExt = (useLados && useLlapasasLado && llapLadoPosicion === "exterior") ? llapLadoGrosor : 0;
-  const llapTesteroExt = (useTesteros && useLlapasasTestero && llapTesteroPosicion === "exterior") ? llapTesteroGrosor : 0;
+  const llapInclinadaLadoClavadaExt = (useLados && useLlapasasLado && useLlapInclinadaLado && llapInclinadaLadoClavada && llapLadoPosicion === "exterior") ? llapLadoGrosor : 0;
+  const llapInclinadaTesteroClavadaExt = (useTesteros && useLlapasasTestero && useLlapInclinadaTestero && llapInclinadaTesteroClavada && llapTesteroPosicion === "exterior") ? llapTesteroGrosor : 0;
+  const llapLadoExt = ((useLados && useLlapasasLado && llapLadoPosicion === "exterior") ? llapLadoGrosor : 0) + llapInclinadaLadoClavadaExt;
+  const llapTesteroExt = ((useTesteros && useLlapasasTestero && llapTesteroPosicion === "exterior") ? llapTesteroGrosor : 0) + llapInclinadaTesteroClavadaExt;
 
   // ── Apoyos validados ──
   const validApoyoLado = (() => {
@@ -224,6 +228,8 @@ export function buildConfig(s: Cfg): Cfg {
     llapTapaOrient: g(s.llapTapaOrient, "largo"), llapTapaAncho: g(s.llapTapaAncho, 8), llapTapaGrosor, llapTapaClaro: g(s.llapTapaClaro, 65), llapTapaPosicion,
     llapIntLargo, llapIntAncho, llapIntAlto,
     llapInclinadaLadoCount: g(s.llapInclinadaLadoCount, 2), llapInclinadaTesteroCount: g(s.llapInclinadaTesteroCount, 2),
+    llapInclinadaLadoClavada, llapInclinadaTesteroClavada,
+    llapInclinadaLadoIgual: g(s.llapInclinadaLadoIgual, false), llapInclinadaTesteroIgual: g(s.llapInclinadaTesteroIgual, false),
     llapLadoAltura: g(s.llapLadoAltura, "estandar"), llapTesteroAltura: g(s.llapTesteroAltura, "estandar"),
     overrides: g(s.overrides, {}),
     useCuadradillos, cuadradilloAncho: g(s.cuadradilloAncho, 10), cuadradilloGrosor: g(s.cuadradilloGrosor, 10), cuadradilloClaro: g(s.cuadradilloClaro, 65),
@@ -252,6 +258,8 @@ export function computePieces(cfg: Cfg): Piece[] {
     useLlapasasTestero, llapTesteroOrient, llapTesteroAncho, llapTesteroGrosor, llapTesteroClaro, llapTesteroPosicion, useLlapInclinadaTestero, useRecuadrosTestero, recuadroTesteroClaro,
     useLlapasasTapa, llapTapaOrient, llapTapaAncho, llapTapaGrosor, llapTapaClaro, llapTapaPosicion, useRecuadrosTapa, recuadroTapaClaro,
     llapIntLargo = 0, llapIntAncho = 0, llapIntAlto = 0, llapInclinadaLadoCount = 2, llapInclinadaTesteroCount = 2, llapLadoAltura = "estandar", llapTesteroAltura = "estandar",
+    llapInclinadaLadoIgual = false, llapInclinadaTesteroIgual = false,
+    llapInclinadaLadoClavada = false, llapInclinadaTesteroClavada = false,
     overrides = {}, useTacosArrastre = false, tacoArrastreLargo = 40, tacoArrastreChaflan = 5, tacoArrastreAncho = 0,
     useCuadradillos = false, cuadradilloAncho = 10, cuadradilloGrosor = 10, cuadradilloClaro = 65, useTapabocaFrontal = false, useTapabocaTrasero = false,
     useTapabocaIzquierda = false, useTapabocaDerecha = false,
@@ -278,8 +286,15 @@ export function computePieces(cfg: Cfg): Piece[] {
   const ladoLlapThreshold = useLados ? apoyoThreshold(apoyoLadoLlap || apoyoLado) : -1;
   const testeroLlapThreshold = useTesteros ? apoyoThreshold(apoyoTesteroLlap || apoyoTestero) : -1;
 
-  const llapLadoExt = (useLlapasasLado && llapLadoPosicion === "exterior") ? llapLadoGrosor : 0;
-  const llapTesteroExt = (useLlapasasTestero && llapTesteroPosicion === "exterior") ? llapTesteroGrosor : 0;
+  const llapInclinadaLadoClavadaExt = (useLlapasasLado && useLlapInclinadaLado && llapInclinadaLadoClavada && llapLadoPosicion === "exterior") ? llapLadoGrosor : 0;
+  const llapInclinadaTesteroClavadaExt = (useLlapasasTestero && useLlapInclinadaTestero && llapInclinadaTesteroClavada && llapTesteroPosicion === "exterior") ? llapTesteroGrosor : 0;
+  // Versión "base" (SIN clavada) — para el wrap-around cruzado entre cara
+  // dominante y dominada (fullExtLado/fullExtTestero más abajo), que solo
+  // tiene que alcanzar la llapasa recta de la otra cara, no su tercer nivel.
+  const llapLadoExtBase = (useLlapasasLado && llapLadoPosicion === "exterior") ? llapLadoGrosor : 0;
+  const llapTesteroExtBase = (useLlapasasTestero && llapTesteroPosicion === "exterior") ? llapTesteroGrosor : 0;
+  const llapLadoExt = llapLadoExtBase + llapInclinadaLadoClavadaExt;
+  const llapTesteroExt = llapTesteroExtBase + llapInclinadaTesteroClavadaExt;
   const llapLadoSplitExt = useLlapasasLado ? llapLadoGrosor : 0;
   const llapTesteroSplitExt = useLlapasasTestero ? llapTesteroGrosor : 0;
 
@@ -626,8 +641,8 @@ export function computePieces(cfg: Cfg): Piece[] {
   const ladoLlapY = useLados ? getLayerY(apoyoLadoLlap || apoyoLado) : 0;
   const testeroLlapY = useTesteros ? getLayerY(apoyoTesteroLlap || apoyoTestero) : 0;
 
-  const fullExtTestero = useTesteros ? (testeroGrosor + llapTesteroExt) : 0;
-  const fullExtLado = useLados ? (ladoGrosor + llapLadoExt) : 0;
+  const fullExtTestero = useTesteros ? (testeroGrosor + llapTesteroExtBase) : 0;
+  const fullExtLado = useLados ? (ladoGrosor + llapLadoExtBase) : 0;
 
   let ladoCubrirLongX: number, ladoLlapLongX: number, ladoStartX: number;
   let testeroCubrirLongZ: number, testeroLlapLongZ: number, testeroStartZ: number;
@@ -881,18 +896,23 @@ export function computePieces(cfg: Cfg): Piece[] {
       const gap1 = (incPosI[1] - llapLadoAncho / 2) - (incPosI[0] + llapLadoAncho / 2);
       const gapLast = (incPosI[incPosI.length - 1] - llapLadoAncho / 2) - (incPosI[incPosI.length - 2] + llapLadoAncho / 2);
       const faceH = isHoriz ? incRunX : incLadoHeight;
+      const clavadaActivo = llapInclinadaLadoClavada && llapLadoPosicion === "exterior";
+      const clavadaLen = clavadaActivo ? llapLadoAncho : 0;
+      const clavadaZ = clavadaActivo ? llapLadoGrosor : 0;
       for (let si = 0; si < 2; si++) {
         const isFar = si === 1;
-        const zOut = isFar ? (baseAncho + ladoGrosor) : (-ladoGrosor - llapLadoGrosor);
+        const zOut = (isFar ? (baseAncho + ladoGrosor) : (-ladoGrosor - llapLadoGrosor)) + (isFar ? 1 : -1) * clavadaZ;
         const zIn = isFar ? (baseAncho - llapLadoGrosor) : 0;
         const incZ = llapLadoPosicion === "exterior" ? zOut : zIn;
         const sX = -(incRunX - baseLargo) / 2;
         const useHalfGap = incPosI.length === 2 && llapInclinadaLadoCount !== 1;
-        const g1 = useHalfGap ? gap1 / 2 : gap1;
-        const gL = useHalfGap ? gapLast / 2 : gapLast;
+        const g1Base = useHalfGap ? gap1 / 2 : gap1;
+        const gLBase = useHalfGap ? gapLast / 2 : gapLast;
+        const g1 = g1Base + 2 * clavadaLen;
+        const gL = gLBase + 2 * clavadaLen;
         const allGaps = [
-          { g: g1, dStart: incPosI[0] + llapLadoAncho / 2, sign: 1 },
-          { g: gL, dStart: incPosI[incPosI.length - 1] - llapLadoAncho / 2 - gL, sign: -1 },
+          { g: g1, dStart: incPosI[0] + llapLadoAncho / 2 - clavadaLen, sign: 1 },
+          { g: gL, dStart: incPosI[incPosI.length - 1] - llapLadoAncho / 2 - gLBase - clavadaLen, sign: -1 },
         ];
         const gaps = llapInclinadaLadoCount === 1 ? [allGaps[0]] : allGaps;
         for (let p = 0; p < gaps.length; p++) {
@@ -902,7 +922,7 @@ export function computePieces(cfg: Cfg): Piece[] {
           if (L <= 0) continue;
           const cDist = dStart + g / 2;
           const cRun = faceH / 2;
-          const rotAngle = a * sign;
+          const rotAngle = a * sign * (llapInclinadaLadoIgual ? (isFar ? 1 : -1) : 1);
           const id = `llap-incl-lado-${si}-${p}`;
           if (isHoriz) {
             pieces.push({ id, layer: "llap-incl-lado", parentIndex: si, diagIndex: p, cx: sX + cRun, cy: incLadoBaseY + incOrillaLift + cDist, cz: incZ + llapLadoGrosor / 2, w: L, h: llapLadoAncho, d: llapLadoGrosor, rotZ: rotAngle });
@@ -958,18 +978,23 @@ export function computePieces(cfg: Cfg): Piece[] {
       const gap1 = (incPosT[1] - llapTesteroAncho / 2) - (incPosT[0] + llapTesteroAncho / 2);
       const gapLast = (incPosT[incPosT.length - 1] - llapTesteroAncho / 2) - (incPosT[incPosT.length - 2] + llapTesteroAncho / 2);
       const faceH = isHorizT ? incRunZT : incTesteroHeight;
+      const clavadaActivoT = llapInclinadaTesteroClavada && llapTesteroPosicion === "exterior";
+      const clavadaLenT = clavadaActivoT ? llapTesteroAncho : 0;
+      const clavadaXT = clavadaActivoT ? llapTesteroGrosor : 0;
       for (let si = 0; si < 2; si++) {
         const isFar = si === 1;
-        const xOut = isFar ? (baseLargo + testeroGrosor) : (-testeroGrosor - llapTesteroGrosor);
+        const xOut = (isFar ? (baseLargo + testeroGrosor) : (-testeroGrosor - llapTesteroGrosor)) + (isFar ? 1 : -1) * clavadaXT;
         const xIn = isFar ? (baseLargo - llapTesteroGrosor) : 0;
         const incX = llapTesteroPosicion === "exterior" ? xOut : xIn;
         const sZ = -(incRunZT - baseAncho) / 2;
         const useHalfGapT = incPosT.length === 2 && llapInclinadaTesteroCount !== 1;
-        const g1t = useHalfGapT ? gap1 / 2 : gap1;
-        const gLt = useHalfGapT ? gapLast / 2 : gapLast;
+        const g1tBase = useHalfGapT ? gap1 / 2 : gap1;
+        const gLtBase = useHalfGapT ? gapLast / 2 : gapLast;
+        const g1t = g1tBase + 2 * clavadaLenT;
+        const gLt = gLtBase + 2 * clavadaLenT;
         const allGapsT = [
-          { g: g1t, dStart: incPosT[0] + llapTesteroAncho / 2, sign: 1 },
-          { g: gLt, dStart: incPosT[incPosT.length - 1] - llapTesteroAncho / 2 - gLt, sign: -1 },
+          { g: g1t, dStart: incPosT[0] + llapTesteroAncho / 2 - clavadaLenT, sign: 1 },
+          { g: gLt, dStart: incPosT[incPosT.length - 1] - llapTesteroAncho / 2 - gLtBase - clavadaLenT, sign: -1 },
         ];
         const gaps = llapInclinadaTesteroCount === 1 ? [allGapsT[0]] : allGapsT;
         for (let p = 0; p < gaps.length; p++) {
@@ -979,7 +1004,7 @@ export function computePieces(cfg: Cfg): Piece[] {
           if (L <= 0) continue;
           const cDist = dStart + g / 2;
           const cRun = faceH / 2;
-          const rotAngle = a * sign;
+          const rotAngle = a * sign * (isFar && llapInclinadaTesteroIgual ? -1 : 1);
           const id = `llap-incl-testero-${si}-${p}`;
           if (isHorizT) {
             pieces.push({ id, layer: "llap-incl-testero", parentIndex: si, diagIndex: p, cx: incX + llapTesteroGrosor / 2, cy: incTesteroBaseY + incOrillaLiftT + cDist, cz: sZ + cRun, w: llapTesteroGrosor, h: llapTesteroAncho, d: L, rotX: -rotAngle });

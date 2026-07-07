@@ -110,18 +110,32 @@ export function construirMeshCrate(
   const cx = (bbox.minX + bbox.maxX) / 2;
   const cz = (bbox.minZ + bbox.maxZ) / 2;
   for (const b of boxes) {
-    const w = (b.x1 - b.x0) * E, h = (b.y1 - b.y0) * E, d = (b.z1 - b.z0) * E;
+    let w: number, h: number, d: number, px: number, py: number, pz: number;
+    if (b.rot) {
+      // Inclinada montada: forma real (dimensiones locales sin rotar) + giro,
+      // no un bloque recto del tamaño de su caja envolvente.
+      w = b.rot.w * E; h = b.rot.h * E; d = b.rot.d * E;
+      px = (b.rot.cx - cx) * E; py = b.rot.cy * E; pz = (b.rot.cz - cz) * E;
+    } else {
+      w = (b.x1 - b.x0) * E; h = (b.y1 - b.y0) * E; d = (b.z1 - b.z0) * E;
+      px = ((b.x0 + b.x1) / 2 - cx) * E; py = (b.y0 + b.y1) / 2 * E; pz = ((b.z0 + b.z1) / 2 - cz) * E;
+    }
     if (w <= 0 || h <= 0 || d <= 0) continue;
     const geo = new THREE.BoxGeometry(w, h, d);
     geomsCreadas.push(geo);
     const mesh = new THREE.Mesh(geo, material(b.layer));
-    mesh.position.set(((b.x0 + b.x1) / 2 - cx) * E, (b.y0 + b.y1) / 2 * E, ((b.z0 + b.z1) / 2 - cz) * E);
+    mesh.position.set(px, py, pz);
+    if (b.rot) {
+      if (b.rot.axis === "z") mesh.rotation.z = b.rot.angle;
+      else mesh.rotation.x = b.rot.angle;
+    }
     inner.add(mesh);
     if (matBorde) {
       const edges = new THREE.EdgesGeometry(geo);
       geomsCreadas.push(edges);
       const ls = new THREE.LineSegments(edges, matBorde);
       ls.position.copy(mesh.position);
+      ls.rotation.copy(mesh.rotation);
       inner.add(ls);
     }
   }

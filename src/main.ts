@@ -2,6 +2,7 @@ import "./style.css";
 import {
   planificarCargaCamion,
   DEFAULT_TRUCK_PROFILE,
+  SIN_LIMITE_PESO_KG,
   type ObstaculoPlanta,
   type Reference,
   type OrderLine,
@@ -28,8 +29,11 @@ const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null
 const crateRefsCrudas = new Map<string, CrateReference>();
 
 let customRefs: Reference[] = [];
+// Bultos añadidos a pelo (sin JSON, solo medidas) — independientes del
+// catálogo derivado de JSON del constructor: recomponerRefs() no los toca.
+let refsManuales: Reference[] = [];
 
-function catalogoCompleto(): Reference[] { return [...CATALOGO_BASE, ...customRefs]; }
+function catalogoCompleto(): Reference[] { return [...CATALOGO_BASE, ...customRefs, ...refsManuales]; }
 
 // ============================================================================
 // COLORES
@@ -121,6 +125,33 @@ document.getElementById("app")!.innerHTML = `
         <p class="custom-ref-error" id="crate-error"></p>
       </div>
 
+      <!-- Añadir bulto a pelo (sin JSON, solo medidas) -->
+      <div class="panel">
+        <h2>Añadir bulto (sin JSON)</h2>
+        <div class="custom-ref-form">
+          <div class="custom-ref-row">
+            <label class="field field--wide"><span>SKU</span><input type="text" id="mr-sku" placeholder="ref-001"/></label>
+            <label class="field field--wide"><span>Nombre</span><input type="text" id="mr-nombre" placeholder="(opcional)"/></label>
+          </div>
+          <div class="custom-ref-row">
+            <label class="field"><span>Largo (cm)</span><input type="number" id="mr-largo" min="0" step="any"/></label>
+            <label class="field"><span>Ancho (cm)</span><input type="number" id="mr-ancho" min="0" step="any"/></label>
+            <label class="field"><span>Alto (cm)</span><input type="number" id="mr-alto" min="0" step="any"/></label>
+          </div>
+          <div class="custom-ref-row">
+            <label class="field"><span>Peso ud. (kg)</span><input type="number" id="mr-peso" min="0" step="any"/></label>
+            <label class="field"><span>Ud./palet</span><input type="number" id="mr-unidades" min="1" step="1" value="1"/></label>
+            <label class="field"><span>Lote mínimo</span><input type="number" id="mr-lote" min="1" step="1" value="1"/></label>
+          </div>
+          <label class="checkbox-field">
+            <input type="checkbox" id="mr-apilable" checked/>
+            <span>Apilable</span>
+          </label>
+          <button class="btn-add-ref" id="btn-add-manual">+ Añadir bulto</button>
+          <p class="custom-ref-error" id="mr-error"></p>
+        </div>
+      </div>
+
       <!-- Avisos lote mínimo -->
       <div class="avisos" id="avisos-lote"></div>
 
@@ -201,6 +232,7 @@ interface EstadoPersistido {
   permitirVarios: boolean;
   detalle3D: boolean;
   crateRefsCrudas: CrateReference[];
+  refsManuales: Reference[];
   colores: Record<string, string>;
   stacksBloqueados: StackBloqueado[];
   stagedStacks: StagedStack[];
@@ -215,6 +247,7 @@ function guardarEstadoInmediato() {
     permitirVarios,
     detalle3D,
     crateRefsCrudas: Array.from(crateRefsCrudas.values()),
+    refsManuales,
     colores: Object.fromEntries(colorPorRef),
     stacksBloqueados: Array.from(stacksBloqueados.values()),
     stagedStacks,
@@ -255,6 +288,8 @@ function restaurarEstadoGuardado(): boolean {
     crateRefsCrudas.set(cr.id, cr);
     crateGeomPorRef.set(cr.id, cr.crateJson);
   }
+  refsManuales = estado.refsManuales ?? [];
+  for (const r of refsManuales) colorDe(r.id);
   for (const [id, color] of Object.entries(estado.colores ?? {})) {
     colorPorRef.set(id, color);
   }
@@ -278,7 +313,7 @@ function restaurarEstadoGuardado(): boolean {
   (document.getElementById("cb-detalle")  as HTMLInputElement).checked = detalle3D;
   actualizarMeta();
 
-  return crateRefsCrudas.size > 0 || Object.keys(estado.cantidades ?? {}).length > 0;
+  return crateRefsCrudas.size > 0 || refsManuales.length > 0 || Object.keys(estado.cantidades ?? {}).length > 0;
 }
 
 function borrarEstadoGuardadoYReiniciar() {
@@ -312,7 +347,7 @@ function renderOrderRows() {
     // Si el valor actual es inferior al mínimo bloqueado, clampear hacia arriba
     const raw = cant[ref.id] ?? CANTIDADES_INICIALES[ref.id] ?? 0;
     const v   = locked > 0 ? Math.max(raw, locked) : raw;
-    const esCustom = customRefs.some(r => r.id === ref.id);
+    const esCustom = customRefs.some(r => r.id === ref.id) || refsManuales.some(r => r.id === ref.id);
     const esDesmontado = crateInfoPorRef.get(ref.id)?.esDesmontado;
     return `
       <div class="order-row" data-refid="${ref.id}">
@@ -339,6 +374,13 @@ function renderOrderRows() {
     btn.addEventListener("click", () => {
       const id = btn.dataset.remove!;
       colorPorRef.delete(id);
+      if (refsManuales.some(r => r.id === id)) {
+        refsManuales = refsManuales.filter(r => r.id !== id);
+        renderOrderRows();
+        planAuto();
+        guardarEstadoDebounced();
+        return;
+      }
       crateRefsCrudas.delete(id);
       crateGeomPorRef.delete(id);
       recomponerRefs();
@@ -402,6 +444,75 @@ function recomponerRefs() {
   renderOrderRows();
   planAuto();
 }
+
+// ── Añadir bulto a pelo (sin JSON, solo medidas) ──────────────────────────
+const mrSkuEl = document.getElementById("mr-sku") as HTMLInputElement;
+const mrNombreEl = document.getElementById("mr-nombre") as HTMLInputElement;
+const mrLargoEl = document.getElementById("mr-largo") as HTMLInputElement;
+const mrAnchoEl = document.getElementById("mr-ancho") as HTMLInputElement;
+const mrAltoEl = document.getElementById("mr-alto") as HTMLInputElement;
+const mrPesoEl = document.getElementById("mr-peso") as HTMLInputElement;
+const mrUnidadesEl = document.getElementById("mr-unidades") as HTMLInputElement;
+const mrLoteEl = document.getElementById("mr-lote") as HTMLInputElement;
+const mrApilableEl = document.getElementById("mr-apilable") as HTMLInputElement;
+const mrErrorEl = document.getElementById("mr-error")!;
+
+document.getElementById("btn-add-manual")!.addEventListener("click", () => {
+  const sku = mrSkuEl.value.trim();
+  const largoCm = Number(mrLargoEl.value);
+  const anchoCm = Number(mrAnchoEl.value);
+  const altoCm = Number(mrAltoEl.value);
+  const pesoKg = Number(mrPesoEl.value);
+  const unidades = Math.max(1, Math.round(Number(mrUnidadesEl.value) || 1));
+  const lote = Math.max(1, Math.round(Number(mrLoteEl.value) || 1));
+
+  const numPos = (v: number) => isFinite(v) && v > 0;
+  let error = "";
+  if (!sku) error = "Falta el SKU.";
+  else if (catalogoCompleto().some(r => r.id === sku)) error = `Ya existe una referencia con SKU "${sku}".`;
+  else if (!numPos(largoCm) || !numPos(anchoCm) || !numPos(altoCm)) error = "Largo/ancho/alto deben ser números > 0.";
+  else if (!numPos(pesoKg)) error = "El peso debe ser un número > 0.";
+
+  if (error) {
+    mrErrorEl.textContent = error;
+    mrErrorEl.style.display = "block";
+    return;
+  }
+  mrErrorEl.style.display = "none";
+
+  const ref: Reference = {
+    id: sku,
+    sku,
+    nombre: mrNombreEl.value.trim() || sku,
+    unidadesPorPalet: unidades,
+    loteMinimo: lote,
+    apilable: mrApilableEl.checked,
+    palletType: {
+      id: `pt-${sku}`,
+      nombre: `Bulto ${sku}`,
+      largoMm: Math.round(largoCm * 10),
+      anchoMm: Math.round(anchoCm * 10),
+      alturaBaseMm: 0,
+      pesoMaxKg: SIN_LIMITE_PESO_KG,
+      pesoTaraKg: 0,
+    },
+    pesoUnitarioKg: pesoKg,
+    alturaPaletCompletoMm: Math.round(altoCm * 10),
+  };
+  refsManuales.push(ref);
+  colorDe(ref.id);
+
+  // Limpiar el formulario para el siguiente bulto, dejando unidades/lote/
+  // apilable tal cual (lo típico es añadir varios seguidos con esos iguales).
+  mrSkuEl.value = ""; mrNombreEl.value = "";
+  mrLargoEl.value = ""; mrAnchoEl.value = ""; mrAltoEl.value = ""; mrPesoEl.value = "";
+  mrSkuEl.focus();
+
+  renderOrderRows();
+  planAuto();
+  guardarEstadoDebounced();
+});
+
 async function cargarRefsIniciales() {
   let nombres: string[] = [];
   try {
