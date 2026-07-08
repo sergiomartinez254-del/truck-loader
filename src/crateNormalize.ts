@@ -28,6 +28,10 @@ export interface CajaAABB {
    * válido una vez reposicionada como panel plano).
    */
   rot?: { axis: "x" | "z"; angle: number; cx: number; cy: number; cz: number; w: number; h: number; d: number };
+  /** Presente SOLO en barrotes sueltos: a qué cara está asociado (o null si
+   * es libre), para poder decidir en el desmontado si se queda con la base
+   * o se excluye (si está en lado/testero/tapa). */
+  attachedTo?: string | null;
 }
 
 function isWall(l: string): boolean {
@@ -42,17 +46,23 @@ export function piezasABoxes(pieces: Piece[], cfg: Cfg): CajaAABB[] {
 
   const push = (
     layer: string, id: string, X0: number, Y0: number, Z0: number, X1: number, Y1: number, Z1: number,
-    rot?: CajaAABB["rot"],
+    rot?: CajaAABB["rot"], attachedTo?: string | null,
   ) => {
     out.push({
       layer, id,
       x0: Math.min(X0, X1), y0: Math.min(Y0, Y1), z0: Math.min(Z0, Z1),
       x1: Math.max(X0, X1), y1: Math.max(Y0, Y1), z1: Math.max(Z0, Z1),
       ...(rot ? { rot } : {}),
+      ...(attachedTo !== undefined ? { attachedTo } : {}),
     });
   };
 
+  const hiddenPieces = (cfg.hiddenPieces ?? {}) as Record<string, boolean>;
+
   for (const p of pieces) {
+    // Igual que el propio visor del constructor: una pieza ocultada ahí
+    // (para inspeccionar el interior) no debe aparecer tampoco aquí.
+    if (hiddenPieces[p.id as string]) continue;
     const l = p.layer as string;
     const pLargo = p.layerLargo != null ? p.layerLargo : (isWall(l) ? bLargo : largo);
     const pAncho = p.layerAncho != null ? p.layerAncho : (isWall(l) ? bAncho : ancho);
@@ -131,6 +141,14 @@ export function piezasABoxes(pieces: Piece[], cfg: Cfg): CajaAABB[] {
       d = (p.orient === "largo") ? p.ancho : p.largoPieza;
       if (p.orient === "largo") { x = ox + p.center - (w as number) / 2; z = oz + p.edgePos; }
       else { x = ox + p.edgePos; z = oz + p.center - (d as number) / 2; }
+    } else if (l === "barrote") {
+      // Suelto: x/z ya vienen en coordenadas de mundo (sin el offset ox/oz
+      // del resto de piezas) y representan el CENTRO, no una esquina —
+      // igual que en el constructor.
+      if (p.orient === "largo") { w = p.largo; h = p.alto; d = p.ancho; }
+      else if (p.orient === "ancho") { w = p.ancho; h = p.alto; d = p.largo; }
+      else { w = p.ancho; h = p.largo; d = p.alto; } // vertical
+      x = (p.x as number) - (w as number) / 2; z = (p.z as number) - (d as number) / 2;
     } else if (l === "lado-plancha" || l === "testero-plancha" || l === "tapa-plancha") {
       w = p.largoPieza; h = p.alto; d = p.anchoPieza; x = ox + p.x; z = oz + p.z;
     } else if (l === "lado-tabla") {
@@ -152,7 +170,7 @@ export function piezasABoxes(pieces: Piece[], cfg: Cfg): CajaAABB[] {
     }
 
     if (w == null || h == null || d == null) continue;
-    push(l, p.id, x, y, z, x + w, y + h, z + d);
+    push(l, p.id, x, y, z, x + w, y + h, z + d, undefined, l === "barrote" ? (p.attachedTo ?? null) : undefined);
   }
 
   return out;
@@ -206,8 +224,19 @@ const TAPA_LAYERS = new Set(["tapa-plancha", "tapa-tabla", "llap-tapa", "rec-tap
  * anchos y delgados como una pared). Para no inflar por error la altura de
  * la base (el mismo bug que tenían las llapasas), se excluyen del dibujo en
  * modo desmontado en vez de dejarlos mal clasificados.
+ *
+ * Los barrotes sueltos (añadidos a mano) se tratan igual, pero solo cuando
+ * están asociados a lado/testero/tapa: no viajan con su pared (de momento,
+ * eso queda para más adelante). Los asociados a la base (o libres, sin
+ * asociar) SÍ cuentan — se quedan con la base sin más, como cualquier otra
+ * pieza de la base, sin necesitar ningún caso especial aquí.
  */
-const IGNORAR_EN_DESMONTADO = new Set(["puntal", "barrote-ref"]);
+const IGNORAR_LAYERS = new Set(["puntal", "barrote-ref"]);
+function ignorarEnDesmontado(b: CajaAABB): boolean {
+  if (IGNORAR_LAYERS.has(b.layer)) return true;
+  if (b.layer === "barrote") return b.attachedTo === "lado" || b.attachedTo === "testero" || b.attachedTo === "tapa";
+  return false;
+}
 
 /** El id de cada pieza lleva el índice de cara justo detrás ("lado-0",
  * "testero-1-tabla-3"...). Hace falta para tumbar cada lado/testero POR
@@ -233,9 +262,10 @@ function rangoDe(boxes: CajaAABB[]): RangoBox | null {
   return { minX, maxX, minY, maxY, minZ, maxZ };
 }
 
-// LIMITACIÓN: puntales y barrotes de refuerzo no se dibujan en modo
-// desmontado (ver IGNORAR_EN_DESMONTADO más arriba) — el resto de piezas
-// estructurales (paredes con sus llapasas/recuadros, tapa, base) sí.
+// LIMITACIÓN: puntales, barrotes de refuerzo, y barrotes sueltos asociados a
+// lado/testero/tapa no se dibujan en modo desmontado (ver
+// ignorarEnDesmontado más arriba) — el resto de piezas estructurales
+// (paredes con sus llapasas/recuadros, tapa, base, barrotes de base) sí.
 //
 // OPTIMIZACIÓN DE ALTURA: los 2 lados SIEMPRE se apilan uno encima del otro
 // (misma huella, son el mismo panel por duplicado) — igual los 2 testeros
@@ -246,7 +276,7 @@ function rangoDe(boxes: CajaAABB[]): RangoBox | null {
 // eso NO hace crecer la huella que ya establece la base/tapa. Si no caben
 // juntos, cada bloque va en su propia capa.
 export function desmontarBoxes(boxesOriginales: CajaAABB[]): CajaAABB[] {
-  const boxes = boxesOriginales.filter(b => !IGNORAR_EN_DESMONTADO.has(b.layer));
+  const boxes = boxesOriginales.filter(b => !ignorarEnDesmontado(b));
   const esLado = (b: CajaAABB) => LADO_LAYERS.has(b.layer);
   const esTestero = (b: CajaAABB) => TESTERO_LAYERS.has(b.layer);
   const esTapa = (b: CajaAABB) => TAPA_LAYERS.has(b.layer);

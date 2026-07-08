@@ -1,13 +1,13 @@
 {
   "meta": {
-    "sku": "9026008217",
-    "nombre": "9026008217",
+    "sku": "9026008218",
+    "nombre": "9026008218",
     "tipo": "palet",
     "apilable": true,
     "unidadesPorPack": 5,
     "exterior": {
-      "largoCm": 141,
-      "anchoCm": 141,
+      "largoCm": 139,
+      "anchoCm": 139,
       "altoCm": 16
     },
     "pesoUnidadKg": 0,
@@ -17,8 +17,8 @@
   },
   "crate": {
     "v": 1,
-    "largo": 141,
-    "ancho": 141,
+    "largo": 139,
+    "ancho": 139,
     "alto": 50,
     "dimMode": "interior",
     "apoyoType": "dobleBase",
@@ -155,10 +155,10 @@
     "sabanaExtra": 20,
     "overrides": {
       "cubrir-3": {
-        "center": 115
+        "center": 110
       },
       "cubrir-1": {
-        "center": 26
+        "center": 29
       }
     },
     "barrotes": [
@@ -166,89 +166,89 @@
         "id": "barrote-1783416103754",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 30.7,
         "orient": "ancho",
         "attachedTo": null,
-        "x": -67,
+        "x": -66,
         "y": 13,
-        "z": 54.69999980926514
+        "z": 52.14999961853027
       },
       {
         "id": "barrote-1783416170536",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 30.7,
         "orient": "ancho",
         "attachedTo": null,
-        "x": 67,
+        "x": 66,
         "y": 13,
-        "z": 54.69999980926514
+        "z": 52.14999961853027
       },
       {
         "id": "barrote-1783416204711",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 30.7,
         "orient": "ancho",
         "attachedTo": null,
-        "x": -67,
+        "x": -66,
         "y": 13,
-        "z": -54.69999980926514
+        "z": -52.14999961853027
       },
       {
         "id": "barrote-1783416341726",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 30.7,
         "orient": "ancho",
         "attachedTo": null,
-        "x": 67,
+        "x": 66,
         "y": 13,
-        "z": -54.69999980926514
+        "z": -52.14999961853027
       },
       {
         "id": "barrote-1783416368965",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 30.7,
         "orient": "largo",
         "attachedTo": null,
-        "x": -51.69999980926514,
+        "x": -49.14999961853027,
         "y": 13,
-        "z": 67
+        "z": 66
       },
       {
         "id": "barrote-1783416401342",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 30.7,
         "orient": "largo",
         "attachedTo": null,
-        "x": 51.69999980926514,
+        "x": 49.14999961853027,
         "y": 13,
-        "z": 67
+        "z": 66
       },
       {
         "id": "barrote-1783416420430",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 30.7,
         "orient": "largo",
         "attachedTo": null,
-        "x": -51.69999980926514,
+        "x": -49.14999961853027,
         "y": 13,
-        "z": -67
+        "z": -66
       },
       {
         "id": "barrote-1783416437669",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 30.7,
         "orient": "largo",
         "attachedTo": null,
-        "x": 51.69999980926514,
+        "x": 49.14999961853027,
         "y": 13,
-        "z": -67
+        "z": -66
       }
     ],
     "cunas": [],

@@ -1,13 +1,13 @@
 {
   "meta": {
-    "sku": "9026008217",
-    "nombre": "9026008217",
+    "sku": "9026008212",
+    "nombre": "9026008212",
     "tipo": "palet",
     "apilable": true,
     "unidadesPorPack": 5,
     "exterior": {
-      "largoCm": 141,
-      "anchoCm": 141,
+      "largoCm": 172,
+      "anchoCm": 172,
       "altoCm": 16
     },
     "pesoUnidadKg": 0,
@@ -17,8 +17,8 @@
   },
   "crate": {
     "v": 1,
-    "largo": 141,
-    "ancho": 141,
+    "largo": 172,
+    "ancho": 172,
     "alto": 50,
     "dimMode": "interior",
     "apoyoType": "dobleBase",
@@ -61,7 +61,7 @@
     "cubrirType": "jaula",
     "cubrirGrosor": 3,
     "tablaAnchoCubrir": 7,
-    "separacionTablas": 27,
+    "separacionTablas": 25,
     "useLados": false,
     "ladoCubrirType": "contrachapado",
     "ladoGrosor": 0.9,
@@ -154,11 +154,17 @@
     "useSabana": false,
     "sabanaExtra": 20,
     "overrides": {
-      "cubrir-3": {
-        "center": 115
+      "cubrir-5": {
+        "center": 133
       },
       "cubrir-1": {
-        "center": 26
+        "center": 39
+      },
+      "cubrir-2": {
+        "center": 66
+      },
+      "cubrir-4": {
+        "center": 106
       }
     },
     "barrotes": [
@@ -166,89 +172,89 @@
         "id": "barrote-1783416103754",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 40.8,
         "orient": "ancho",
-        "attachedTo": null,
-        "x": -67,
+        "attachedTo": "base",
+        "x": -82.5,
         "y": 13,
-        "z": 54.69999980926514
+        "z": 63.60000038146973
       },
       {
         "id": "barrote-1783416170536",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 40.8,
         "orient": "ancho",
-        "attachedTo": null,
-        "x": 67,
+        "attachedTo": "base",
+        "x": 82.5,
         "y": 13,
-        "z": 54.69999980926514
+        "z": 63.60000038146973
       },
       {
         "id": "barrote-1783416204711",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 40.8,
         "orient": "ancho",
-        "attachedTo": null,
-        "x": -67,
+        "attachedTo": "base",
+        "x": -82.5,
         "y": 13,
-        "z": -54.69999980926514
+        "z": -63.60000038146973
       },
       {
         "id": "barrote-1783416341726",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 40.8,
         "orient": "ancho",
-        "attachedTo": null,
-        "x": 67,
+        "attachedTo": "base",
+        "x": 82.5,
         "y": 13,
-        "z": -54.69999980926514
+        "z": -63.60000038146973
       },
       {
         "id": "barrote-1783416368965",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 40.8,
         "orient": "largo",
-        "attachedTo": null,
-        "x": -51.69999980926514,
+        "attachedTo": "base",
+        "x": -60.60000038146973,
         "y": 13,
-        "z": 67
+        "z": 82.5
       },
       {
         "id": "barrote-1783416401342",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 40.8,
         "orient": "largo",
-        "attachedTo": null,
-        "x": 51.69999980926514,
+        "attachedTo": "base",
+        "x": 60.60000038146973,
         "y": 13,
-        "z": 67
+        "z": 82.5
       },
       {
         "id": "barrote-1783416420430",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 40.8,
         "orient": "largo",
-        "attachedTo": null,
-        "x": -51.69999980926514,
+        "attachedTo": "base",
+        "x": -60.60000038146973,
         "y": 13,
-        "z": -67
+        "z": -82.5
       },
       {
         "id": "barrote-1783416437669",
         "ancho": 3,
         "alto": 3,
-        "largo": 27.6,
+        "largo": 40.8,
         "orient": "largo",
-        "attachedTo": null,
-        "x": 51.69999980926514,
+        "attachedTo": "base",
+        "x": 60.60000038146973,
         "y": 13,
-        "z": -67
+        "z": -82.5
       }
     ],
     "cunas": [],

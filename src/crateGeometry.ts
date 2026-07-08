@@ -111,6 +111,8 @@ export function buildConfig(s: Cfg): Cfg {
   const apoyoTestero = g(s.apoyoTestero, "cubrir");
   const apoyoLadoLlap = g(s.apoyoLadoLlap, "cubrir");
   const apoyoTesteroLlap = g(s.apoyoTesteroLlap, "cubrir");
+  const apoyoLadoLlapIncl = g(s.apoyoLadoLlapIncl, "cubrir");
+  const apoyoTesteroLlapIncl = g(s.apoyoTesteroLlapIncl, "cubrir");
 
   const useTacosArrastre = g(s.useTacosArrastre, false);
   const useTapabocaFrontal = g(s.useTapabocaFrontal, false);
@@ -165,6 +167,20 @@ export function buildConfig(s: Cfg): Cfg {
     if (apoyoTesteroLlap === "rastrel" && !useRastreles) return "cubrir";
     return apoyoTesteroLlap;
   })() : validApoyoTestero;
+  // Apoyo de la inclinada (exterior): independiente del cubrir, sin
+  // necesitar el toggle de "split" — solo relevante si hay inclinadas.
+  const validApoyoLadoLlapIncl = useLlapInclinadaLado ? (() => {
+    if (apoyoLadoLlapIncl === "tablon" && !useTablones) return "cubrir";
+    if (apoyoLadoLlapIncl === "intermedia" && !effectiveUseIntermedias) return "cubrir";
+    if (apoyoLadoLlapIncl === "rastrel" && !useRastreles) return "cubrir";
+    return apoyoLadoLlapIncl;
+  })() : validApoyoLado;
+  const validApoyoTesteroLlapIncl = useLlapInclinadaTestero ? (() => {
+    if (apoyoTesteroLlapIncl === "tablon" && !useTablones) return "cubrir";
+    if (apoyoTesteroLlapIncl === "intermedia" && !effectiveUseIntermedias) return "cubrir";
+    if (apoyoTesteroLlapIncl === "rastrel" && !useRastreles) return "cubrir";
+    return apoyoTesteroLlapIncl;
+  })() : validApoyoTestero;
 
   // ── Conversión interior/exterior (para obtener el interior real) ──
   const wallDeltaAncho = useLados ? 2 * (ladoGrosor + llapLadoExt) : 0;
@@ -212,9 +228,23 @@ export function buildConfig(s: Cfg): Cfg {
     useTesteros, testeroCubrirType, testeroGrosor, testeroTablaAncho: g(s.testeroTablaAncho, 10), testeroSeparacion: g(s.testeroSeparacion, 15),
     useTapa, tapaCubrirType: g(s.tapaCubrirType, "contrachapado"), tapaGrosor: g(s.tapaGrosor, 0.9),
     tapaTablaAncho: g(s.tapaTablaAncho, 10), tapaSeparacion: g(s.tapaSeparacion, 15), tapaCubrirOrient: g(s.tapaCubrirOrient, "largo"),
-    caraDominante: g(s.caraDominante, "lado"), cargamento: g(s.cargamento, "none"),
+    caraDominante: g(s.caraDominante, "lado"),
+    ...((): { cargamentoCubrir: string; cargamentoLlap: string } => {
+      // Compatibilidad con JSON exportados antes de separar "cargamento" en
+      // dos campos independientes.
+      if (s.cargamentoCubrir !== undefined || s.cargamentoLlap !== undefined) {
+        return { cargamentoCubrir: g(s.cargamentoCubrir, "none"), cargamentoLlap: g(s.cargamentoLlap, "none") };
+      }
+      const migracion: Record<string, [string, string]> = {
+        none: ["none", "none"], espiga: ["espiga", "none"], cargamento: ["cargamento", "none"],
+        "llap-espiga": ["none", "espiga"], "llap-cargamento": ["none", "cargamento"],
+      };
+      const [cubrir, llap] = migracion[s.cargamento as string] ?? ["none", "none"];
+      return { cargamentoCubrir: cubrir, cargamentoLlap: llap };
+    })(),
     apoyoLado: validApoyoLado, apoyoTestero: validApoyoTestero,
     apoyoLadoLlap: validApoyoLadoLlap, apoyoTesteroLlap: validApoyoTesteroLlap,
+    apoyoLadoLlapIncl: validApoyoLadoLlapIncl, apoyoTesteroLlapIncl: validApoyoTesteroLlapIncl,
     useLlapasasLado: useLados && useLlapasasLado, llapLadoOrient, llapLadoAncho: g(s.llapLadoAncho, 8), llapLadoGrosor,
     llapLadoClaro: g(s.llapLadoClaro, 65), llapLadoPosicion,
     useLlapInclinadaLado: useLados && useLlapasasLado && useLlapInclinadaLado && !useRecuadrosLado,
@@ -229,9 +259,11 @@ export function buildConfig(s: Cfg): Cfg {
     llapIntLargo, llapIntAncho, llapIntAlto,
     llapInclinadaLadoCount: g(s.llapInclinadaLadoCount, 2), llapInclinadaTesteroCount: g(s.llapInclinadaTesteroCount, 2),
     llapInclinadaLadoClavada, llapInclinadaTesteroClavada,
+    barrotes: g(s.barrotes, []),
     llapInclinadaLadoIgual: g(s.llapInclinadaLadoIgual, false), llapInclinadaTesteroIgual: g(s.llapInclinadaTesteroIgual, false),
     llapLadoAltura: g(s.llapLadoAltura, "estandar"), llapTesteroAltura: g(s.llapTesteroAltura, "estandar"),
     overrides: g(s.overrides, {}),
+    hiddenPieces: g(s.hiddenPieces, {}),
     useCuadradillos, cuadradilloAncho: g(s.cuadradilloAncho, 10), cuadradilloGrosor: g(s.cuadradilloGrosor, 10), cuadradilloClaro: g(s.cuadradilloClaro, 65),
     usePuntales: usePuntales && useLados && apoyoType === "dobleBase" && dbOrient === "ancho", puntalAncho: g(s.puntalAncho, 10), puntalGrosor: g(s.puntalGrosor, 4.5),
     useBarrotesRef: useBarrotesRef && useTesteros && useLlapasasLado && llapLadoOrient === "largo", barroteRefAncho: g(s.barroteRefAncho, 10), barroteRefGrosor: g(s.barroteRefGrosor, 4.5),
@@ -252,14 +284,15 @@ export function computePieces(cfg: Cfg): Piece[] {
     useLados, ladoCubrirType, ladoGrosor, ladoTablaAncho, ladoSeparacion,
     useTesteros, testeroCubrirType, testeroGrosor, testeroTablaAncho, testeroSeparacion,
     useTapa, tapaCubrirType, tapaGrosor, tapaTablaAncho, tapaSeparacion, tapaCubrirOrient,
-    caraDominante, cargamento, apoyoLado, apoyoTestero,
-    apoyoLadoLlap, apoyoTesteroLlap,
+    caraDominante, cargamentoCubrir, cargamentoLlap, apoyoLado, apoyoTestero,
+    apoyoLadoLlap, apoyoTesteroLlap, apoyoLadoLlapIncl, apoyoTesteroLlapIncl,
     useLlapasasLado, llapLadoOrient, llapLadoAncho, llapLadoGrosor, llapLadoClaro, llapLadoPosicion, useLlapInclinadaLado, useRecuadrosLado, recuadroLadoClaro,
     useLlapasasTestero, llapTesteroOrient, llapTesteroAncho, llapTesteroGrosor, llapTesteroClaro, llapTesteroPosicion, useLlapInclinadaTestero, useRecuadrosTestero, recuadroTesteroClaro,
     useLlapasasTapa, llapTapaOrient, llapTapaAncho, llapTapaGrosor, llapTapaClaro, llapTapaPosicion, useRecuadrosTapa, recuadroTapaClaro,
     llapIntLargo = 0, llapIntAncho = 0, llapIntAlto = 0, llapInclinadaLadoCount = 2, llapInclinadaTesteroCount = 2, llapLadoAltura = "estandar", llapTesteroAltura = "estandar",
     llapInclinadaLadoIgual = false, llapInclinadaTesteroIgual = false,
     llapInclinadaLadoClavada = false, llapInclinadaTesteroClavada = false,
+    barrotes = [],
     overrides = {}, useTacosArrastre = false, tacoArrastreLargo = 40, tacoArrastreChaflan = 5, tacoArrastreAncho = 0,
     useCuadradillos = false, cuadradilloAncho = 10, cuadradilloGrosor = 10, cuadradilloClaro = 65, useTapabocaFrontal = false, useTapabocaTrasero = false,
     useTapabocaIzquierda = false, useTapabocaDerecha = false,
@@ -640,6 +673,8 @@ export function computePieces(cfg: Cfg): Piece[] {
   const testeroY = useTesteros ? getLayerY(apoyoTestero) : 0;
   const ladoLlapY = useLados ? getLayerY(apoyoLadoLlap || apoyoLado) : 0;
   const testeroLlapY = useTesteros ? getLayerY(apoyoTesteroLlap || apoyoTestero) : 0;
+  const ladoInclY = useLados ? getLayerY(apoyoLadoLlapIncl || apoyoLado) : 0;
+  const testeroInclY = useTesteros ? getLayerY(apoyoTesteroLlapIncl || apoyoTestero) : 0;
 
   const fullExtTestero = useTesteros ? (testeroGrosor + llapTesteroExtBase) : 0;
   const fullExtLado = useLados ? (ladoGrosor + llapLadoExtBase) : 0;
@@ -653,23 +688,25 @@ export function computePieces(cfg: Cfg): Piece[] {
   const fullTesteroMax = baseAncho + 2 * fullExtLado;
 
   if (caraDominante === "lado") {
-    if (cargamento === "none") { ladoCubrirLongX = fullLadoMax; ladoLlapLongX = fullLadoMax; }
-    else if (cargamento === "espiga") { ladoCubrirLongX = baseLargo + 2 * (useTesteros ? testeroGrosor : 0); ladoLlapLongX = fullLadoMax; testeroLargoBonus = 2 * ladoGrosor; }
-    else if (cargamento === "cargamento") { ladoCubrirLongX = baseLargo; ladoLlapLongX = fullLadoMax; testeroLargoBonus = 2 * ladoGrosor; }
-    else if (cargamento === "llap-espiga") { ladoCubrirLongX = fullLadoMax; ladoLlapLongX = baseLargo + 2 * (useTesteros ? testeroGrosor : 0); }
-    else { ladoCubrirLongX = fullLadoMax; ladoLlapLongX = baseLargo; }
+    if (cargamentoCubrir === "none") { ladoCubrirLongX = fullLadoMax; }
+    else if (cargamentoCubrir === "espiga") { ladoCubrirLongX = baseLargo + 2 * (useTesteros ? testeroGrosor : 0); testeroLargoBonus = 2 * ladoGrosor; }
+    else { ladoCubrirLongX = baseLargo; testeroLargoBonus = 2 * ladoGrosor; }
+    if (cargamentoLlap === "none") { ladoLlapLongX = fullLadoMax; }
+    else if (cargamentoLlap === "espiga") { ladoLlapLongX = baseLargo + 2 * (useTesteros ? testeroGrosor : 0); }
+    else { ladoLlapLongX = baseLargo; }
     ladoStartX = -(Math.max(ladoCubrirLongX, ladoLlapLongX) - baseLargo) / 2;
-    testeroCubrirLongZ = baseAncho + (cargamento === "cargamento" ? testeroLargoBonus : 0);
+    testeroCubrirLongZ = baseAncho + (cargamentoCubrir === "cargamento" ? testeroLargoBonus : 0);
     testeroLlapLongZ = baseAncho;
     testeroStartZ = -(testeroCubrirLongZ - baseAncho) / 2;
   } else {
-    if (cargamento === "none") { testeroCubrirLongZ = fullTesteroMax; testeroLlapLongZ = fullTesteroMax; }
-    else if (cargamento === "espiga") { testeroCubrirLongZ = baseAncho + 2 * (useLados ? ladoGrosor : 0); testeroLlapLongZ = fullTesteroMax; ladoLargoBonus = 2 * testeroGrosor; }
-    else if (cargamento === "cargamento") { testeroCubrirLongZ = baseAncho; testeroLlapLongZ = fullTesteroMax; ladoLargoBonus = 2 * testeroGrosor; }
-    else if (cargamento === "llap-espiga") { testeroCubrirLongZ = fullTesteroMax; testeroLlapLongZ = baseAncho + 2 * (useLados ? ladoGrosor : 0); }
-    else { testeroCubrirLongZ = fullTesteroMax; testeroLlapLongZ = baseAncho; }
+    if (cargamentoCubrir === "none") { testeroCubrirLongZ = fullTesteroMax; }
+    else if (cargamentoCubrir === "espiga") { testeroCubrirLongZ = baseAncho + 2 * (useLados ? ladoGrosor : 0); ladoLargoBonus = 2 * testeroGrosor; }
+    else { testeroCubrirLongZ = baseAncho; ladoLargoBonus = 2 * testeroGrosor; }
+    if (cargamentoLlap === "none") { testeroLlapLongZ = fullTesteroMax; }
+    else if (cargamentoLlap === "espiga") { testeroLlapLongZ = baseAncho + 2 * (useLados ? ladoGrosor : 0); }
+    else { testeroLlapLongZ = baseAncho; }
     testeroStartZ = -(Math.max(testeroCubrirLongZ, testeroLlapLongZ) - baseAncho) / 2;
-    ladoCubrirLongX = baseLargo + (cargamento === "cargamento" ? ladoLargoBonus : 0);
+    ladoCubrirLongX = baseLargo + (cargamentoCubrir === "cargamento" ? ladoLargoBonus : 0);
     ladoLlapLongX = baseLargo;
     ladoStartX = -(ladoCubrirLongX - baseLargo) / 2;
   }
@@ -679,7 +716,7 @@ export function computePieces(cfg: Cfg): Piece[] {
 
   if (caraDominante === "lado") {
     if (useLados && useLlapasasLado && llapLadoPosicion === "interior") {
-      const tmp = ladoCubrirLongX; ladoCubrirLongX = ladoLlapLongX; ladoLlapLongX = tmp - (cargamento === "espiga" ? llapIntLargo : 0);
+      const tmp = ladoCubrirLongX; ladoCubrirLongX = ladoLlapLongX; ladoLlapLongX = tmp - (cargamentoCubrir === "espiga" ? llapIntLargo : 0);
       ladoStartX = -(Math.max(ladoCubrirLongX, ladoLlapLongX) - baseLargo) / 2;
     }
     if (useTesteros && useLlapasasTestero && llapTesteroPosicion === "interior") {
@@ -688,7 +725,7 @@ export function computePieces(cfg: Cfg): Piece[] {
     }
   } else {
     if (useTesteros && useLlapasasTestero && llapTesteroPosicion === "interior") {
-      const tmp = testeroCubrirLongZ; testeroCubrirLongZ = testeroLlapLongZ; testeroLlapLongZ = tmp - (cargamento === "espiga" ? llapIntAncho : 0);
+      const tmp = testeroCubrirLongZ; testeroCubrirLongZ = testeroLlapLongZ; testeroLlapLongZ = tmp - (cargamentoCubrir === "espiga" ? llapIntAncho : 0);
       testeroStartZ = -(Math.max(testeroCubrirLongZ, testeroLlapLongZ) - baseAncho) / 2;
     }
     if (useLados && useLlapasasLado && llapLadoPosicion === "interior") {
@@ -699,18 +736,18 @@ export function computePieces(cfg: Cfg): Piece[] {
   ladoLongitudX = Math.max(ladoCubrirLongX, ladoLlapLongX);
   testeroLongitudZ = Math.max(testeroCubrirLongZ, testeroLlapLongZ);
 
-  if (caraDominante === "lado" && useTesteros && useLlapasasTestero && llapTesteroPosicion === "interior" && cargamento === "espiga") {
+  if (caraDominante === "lado" && useTesteros && useLlapasasTestero && llapTesteroPosicion === "interior" && cargamentoCubrir === "espiga") {
     testeroCubrirLongZ += testeroLargoBonus; testeroLargoBonus = 0;
     testeroStartZ = -(Math.max(testeroCubrirLongZ, testeroLlapLongZ) - baseAncho) / 2;
     testeroLongitudZ = Math.max(testeroCubrirLongZ, testeroLlapLongZ);
   }
-  if (caraDominante === "testero" && useLados && useLlapasasLado && llapLadoPosicion === "interior" && cargamento === "espiga") {
+  if (caraDominante === "testero" && useLados && useLlapasasLado && llapLadoPosicion === "interior" && cargamentoCubrir === "espiga") {
     ladoCubrirLongX += ladoLargoBonus; ladoLargoBonus = 0;
     ladoStartX = -(Math.max(ladoCubrirLongX, ladoLlapLongX) - baseLargo) / 2;
     ladoLongitudX = Math.max(ladoCubrirLongX, ladoLlapLongX);
   }
 
-  if (cargamento === "cargamento") {
+  if (cargamentoCubrir === "cargamento") {
     if (caraDominante === "lado" && useLlapasasLado && llapLadoPosicion === "interior" && useLlapasasTestero && llapTesteroPosicion === "interior") {
       ladoLlapLongX -= 2 * llapTesteroGrosor; testeroLlapLongZ += 2 * llapLadoGrosor; testeroLargoBonus = 0;
       ladoStartX = -(Math.max(ladoCubrirLongX, ladoLlapLongX) - baseLargo) / 2;
@@ -885,7 +922,7 @@ export function computePieces(cfg: Cfg): Piece[] {
   if (useLlapInclinadaLado && useLlapasasLado && useLados) {
     const isHoriz = llapLadoOrient === "largo";
     const incRunX = ladoLlapLongX + ladoLargoBonus;
-    const incLadoBaseY = llapLadoPosicion === "interior" ? cubrirTopY : ladoY;
+    const incLadoBaseY = llapLadoPosicion === "interior" ? cubrirTopY : ladoInclY;
     const incOrillaLift = (llapLadoPosicion === "interior" && useOrillas && orillaOrient === "largo") ? orillaAlto : 0;
     const incLadoHeight = (cubrirTopY + alto - (llapLadoPosicion === "interior" ? llapIntAlto : 0)) - incLadoBaseY - incOrillaLift;
     const llapDist = isHoriz ? incLadoHeight : incRunX;
@@ -893,11 +930,8 @@ export function computePieces(cfg: Cfg): Piece[] {
     const incPosI = calcPositions(llapDist, incCountI, 0, llapLadoAncho);
 
     if (incPosI.length >= 2) {
-      const gap1 = (incPosI[1] - llapLadoAncho / 2) - (incPosI[0] + llapLadoAncho / 2);
-      const gapLast = (incPosI[incPosI.length - 1] - llapLadoAncho / 2) - (incPosI[incPosI.length - 2] + llapLadoAncho / 2);
       const faceH = isHoriz ? incRunX : incLadoHeight;
       const clavadaActivo = llapInclinadaLadoClavada && llapLadoPosicion === "exterior";
-      const clavadaLen = clavadaActivo ? llapLadoAncho : 0;
       const clavadaZ = clavadaActivo ? llapLadoGrosor : 0;
       for (let si = 0; si < 2; si++) {
         const isFar = si === 1;
@@ -905,16 +939,25 @@ export function computePieces(cfg: Cfg): Piece[] {
         const zIn = isFar ? (baseAncho - llapLadoGrosor) : 0;
         const incZ = llapLadoPosicion === "exterior" ? zOut : zIn;
         const sX = -(incRunX - baseLargo) / 2;
-        const useHalfGap = incPosI.length === 2 && llapInclinadaLadoCount !== 1;
-        const g1Base = useHalfGap ? gap1 / 2 : gap1;
-        const gLBase = useHalfGap ? gapLast / 2 : gapLast;
-        const g1 = g1Base + 2 * clavadaLen;
-        const gL = gLBase + 2 * clavadaLen;
-        const allGaps = [
-          { g: g1, dStart: incPosI[0] + llapLadoAncho / 2 - clavadaLen, sign: 1 },
-          { g: gL, dStart: incPosI[incPosI.length - 1] - llapLadoAncho / 2 - gLBase - clavadaLen, sign: -1 },
-        ];
-        const gaps = llapInclinadaLadoCount === 1 ? [allGaps[0]] : allGaps;
+        let gaps: { g: number; dStart: number; sign: number }[];
+        if (clavadaActivo) {
+          // Clavada: como el caso de 2 llapasas, pero llegando hasta el
+          // BORDE EXTERIOR de la primera y la última — crece 2 anchos de
+          // llapasa en total respecto al hueco a secas.
+          const g = (incPosI[incPosI.length - 1] + llapLadoAncho / 2) - (incPosI[0] - llapLadoAncho / 2);
+          gaps = [{ g, dStart: incPosI[0] - llapLadoAncho / 2, sign: 1 }];
+        } else {
+          const gap1 = (incPosI[1] - llapLadoAncho / 2) - (incPosI[0] + llapLadoAncho / 2);
+          const gapLast = (incPosI[incPosI.length - 1] - llapLadoAncho / 2) - (incPosI[incPosI.length - 2] + llapLadoAncho / 2);
+          const useHalfGap = incPosI.length === 2 && llapInclinadaLadoCount !== 1;
+          const g1 = useHalfGap ? gap1 / 2 : gap1;
+          const gL = useHalfGap ? gapLast / 2 : gapLast;
+          const allGaps = [
+            { g: g1, dStart: incPosI[0] + llapLadoAncho / 2, sign: 1 },
+            { g: gL, dStart: incPosI[incPosI.length - 1] - llapLadoAncho / 2 - gL, sign: -1 },
+          ];
+          gaps = llapInclinadaLadoCount === 1 ? [allGaps[0]] : allGaps;
+        }
         for (let p = 0; p < gaps.length; p++) {
           const { g, dStart, sign } = gaps[p];
           if (g <= 0) continue;
@@ -967,7 +1010,7 @@ export function computePieces(cfg: Cfg): Piece[] {
   if (useLlapInclinadaTestero && useLlapasasTestero && useTesteros) {
     const isHorizT = llapTesteroOrient === "largo";
     const incRunZT = testeroLlapLongZ + testeroLargoBonus;
-    const incTesteroBaseY = llapTesteroPosicion === "interior" ? cubrirTopY : testeroY;
+    const incTesteroBaseY = llapTesteroPosicion === "interior" ? cubrirTopY : testeroInclY;
     const incOrillaLiftT = (llapTesteroPosicion === "interior" && useOrillas && orillaOrient === "ancho") ? orillaAlto : 0;
     const incTesteroHeight = (cubrirTopY + alto - (llapTesteroPosicion === "interior" ? llapIntAlto : 0)) - incTesteroBaseY - incOrillaLiftT;
     const llapDistT = isHorizT ? incTesteroHeight : incRunZT;
@@ -975,11 +1018,8 @@ export function computePieces(cfg: Cfg): Piece[] {
     const incPosT = calcPositions(llapDistT, incCountT, 0, llapTesteroAncho);
 
     if (incPosT.length >= 2) {
-      const gap1 = (incPosT[1] - llapTesteroAncho / 2) - (incPosT[0] + llapTesteroAncho / 2);
-      const gapLast = (incPosT[incPosT.length - 1] - llapTesteroAncho / 2) - (incPosT[incPosT.length - 2] + llapTesteroAncho / 2);
       const faceH = isHorizT ? incRunZT : incTesteroHeight;
       const clavadaActivoT = llapInclinadaTesteroClavada && llapTesteroPosicion === "exterior";
-      const clavadaLenT = clavadaActivoT ? llapTesteroAncho : 0;
       const clavadaXT = clavadaActivoT ? llapTesteroGrosor : 0;
       for (let si = 0; si < 2; si++) {
         const isFar = si === 1;
@@ -987,16 +1027,22 @@ export function computePieces(cfg: Cfg): Piece[] {
         const xIn = isFar ? (baseLargo - llapTesteroGrosor) : 0;
         const incX = llapTesteroPosicion === "exterior" ? xOut : xIn;
         const sZ = -(incRunZT - baseAncho) / 2;
-        const useHalfGapT = incPosT.length === 2 && llapInclinadaTesteroCount !== 1;
-        const g1tBase = useHalfGapT ? gap1 / 2 : gap1;
-        const gLtBase = useHalfGapT ? gapLast / 2 : gapLast;
-        const g1t = g1tBase + 2 * clavadaLenT;
-        const gLt = gLtBase + 2 * clavadaLenT;
-        const allGapsT = [
-          { g: g1t, dStart: incPosT[0] + llapTesteroAncho / 2 - clavadaLenT, sign: 1 },
-          { g: gLt, dStart: incPosT[incPosT.length - 1] - llapTesteroAncho / 2 - gLtBase - clavadaLenT, sign: -1 },
-        ];
-        const gaps = llapInclinadaTesteroCount === 1 ? [allGapsT[0]] : allGapsT;
+        let gaps: { g: number; dStart: number; sign: number }[];
+        if (clavadaActivoT) {
+          const g = (incPosT[incPosT.length - 1] + llapTesteroAncho / 2) - (incPosT[0] - llapTesteroAncho / 2);
+          gaps = [{ g, dStart: incPosT[0] - llapTesteroAncho / 2, sign: 1 }];
+        } else {
+          const gap1 = (incPosT[1] - llapTesteroAncho / 2) - (incPosT[0] + llapTesteroAncho / 2);
+          const gapLast = (incPosT[incPosT.length - 1] - llapTesteroAncho / 2) - (incPosT[incPosT.length - 2] + llapTesteroAncho / 2);
+          const useHalfGapT = incPosT.length === 2 && llapInclinadaTesteroCount !== 1;
+          const g1t = useHalfGapT ? gap1 / 2 : gap1;
+          const gLt = useHalfGapT ? gapLast / 2 : gapLast;
+          const allGapsT = [
+            { g: g1t, dStart: incPosT[0] + llapTesteroAncho / 2, sign: 1 },
+            { g: gLt, dStart: incPosT[incPosT.length - 1] - llapTesteroAncho / 2 - gLt, sign: -1 },
+          ];
+          gaps = llapInclinadaTesteroCount === 1 ? [allGapsT[0]] : allGapsT;
+        }
         for (let p = 0; p < gaps.length; p++) {
           const { g, dStart, sign } = gaps[p];
           if (g <= 0) continue;
@@ -1222,6 +1268,17 @@ export function computePieces(cfg: Cfg): Piece[] {
         pieces.push({ id, layer: "barrote-ref", parentIndex: si, x: si === 1 ? (baseLargo - w) : 0, z: 0, y: ov.y ?? (cY - hY / 2), w, h: hY, d: len, layerLargo: baseLargo, layerAncho: baseAncho });
       }
     }
+  }
+
+  // Barrotes sueltos (añadidos a mano en el constructor). Igual que allí:
+  // piezas de verdad, para que cuenten en el desmontado y en la geometría
+  // que dibuja "Detalle 3D".
+  for (const b of barrotes as any[]) {
+    pieces.push({
+      id: b.id, layer: "barrote", attachedTo: b.attachedTo ?? null,
+      orient: b.orient, largo: b.largo, ancho: b.ancho, alto: b.alto,
+      x: b.x, y: b.y, z: b.z,
+    });
   }
 
   return pieces;

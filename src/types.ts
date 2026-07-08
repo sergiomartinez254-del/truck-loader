@@ -45,6 +45,15 @@ export interface Reference {
   pesoUnitarioKg: number;
   /** Altura total del palet ya cargado al 100% (base + mercancía) */
   alturaPaletCompletoMm: number;
+  /**
+   * Si el packer puede girar 90° la huella de este bulto al buscarle hueco.
+   * `undefined`/`true` = libre (comportamiento de siempre). `false` = debe
+   * respetar SIEMPRE su orientación largo/ancho tal cual viene — típicamente
+   * porque una carretilla solo puede levantarlo por un lado concreto (p.ej.
+   * una base de dobles bases: las palas entran perpendiculares a los
+   * rastreles, girar la construcción 90° la dejaría inaccesible).
+   */
+  rotable?: boolean;
 }
 
 /** Perfil de camión / remolque. Pensado para poder crear varios y elegir uno dinámicamente. */

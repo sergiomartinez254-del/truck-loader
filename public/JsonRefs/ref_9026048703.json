@@ -1,14 +1,14 @@
 {
   "meta": {
-    "sku": "9026008217",
-    "nombre": "9026008217",
+    "sku": "9026048703",
+    "nombre": "9026048703",
     "tipo": "palet",
     "apilable": true,
-    "unidadesPorPack": 5,
+    "unidadesPorPack": 1,
     "exterior": {
-      "largoCm": 141,
-      "anchoCm": 141,
-      "altoCm": 16
+      "largoCm": 131.5,
+      "anchoCm": 131.5,
+      "altoCm": 14.5
     },
     "pesoUnidadKg": 0,
     "paletBase": null,
@@ -17,15 +17,15 @@
   },
   "crate": {
     "v": 1,
-    "largo": 141,
-    "ancho": 141,
+    "largo": 131.5,
+    "ancho": 131.5,
     "alto": 50,
     "dimMode": "interior",
     "apoyoType": "dobleBase",
     "dbOrient": "ancho",
-    "dobleBaseAncho": 10,
+    "dobleBaseAncho": 7,
     "dobleBaseAlto": 10,
-    "claroMax": 80,
+    "claroMax": 30,
     "distOrillas": 0,
     "tacoLargo": 10,
     "tacoAncho": 10,
@@ -59,9 +59,9 @@
     "tapabocaGrosor": 1.8,
     "tapabocaMargen": 2,
     "cubrirType": "jaula",
-    "cubrirGrosor": 3,
-    "tablaAnchoCubrir": 7,
-    "separacionTablas": 27,
+    "cubrirGrosor": 4.5,
+    "tablaAnchoCubrir": 10,
+    "separacionTablas": 4,
     "useLados": false,
     "ladoCubrirType": "contrachapado",
     "ladoGrosor": 0.9,
@@ -154,101 +154,47 @@
     "useSabana": false,
     "sabanaExtra": 20,
     "overrides": {
-      "cubrir-3": {
-        "center": 115
+      "cubrir-8": {
+        "center": 111.5
       },
       "cubrir-1": {
-        "center": 26
+        "center": 20
+      },
+      "cubrir-7": {
+        "center": 98.5
+      },
+      "cubrir-2": {
+        "center": 33
+      },
+      "cubrir-3": {
+        "center": 46.5
+      },
+      "cubrir-5": {
+        "center": 72
       }
     },
     "barrotes": [
       {
-        "id": "barrote-1783416103754",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "ancho",
-        "attachedTo": null,
-        "x": -67,
-        "y": 13,
-        "z": 54.69999980926514
-      },
-      {
-        "id": "barrote-1783416170536",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "ancho",
-        "attachedTo": null,
-        "x": 67,
-        "y": 13,
-        "z": 54.69999980926514
-      },
-      {
-        "id": "barrote-1783416204711",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "ancho",
-        "attachedTo": null,
-        "x": -67,
-        "y": 13,
-        "z": -54.69999980926514
-      },
-      {
-        "id": "barrote-1783416341726",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "ancho",
-        "attachedTo": null,
-        "x": 67,
-        "y": 13,
-        "z": -54.69999980926514
-      },
-      {
-        "id": "barrote-1783416368965",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
+        "id": "barrote-1783493458681",
+        "ancho": 5,
+        "alto": 4.5,
+        "largo": 131.5,
         "orient": "largo",
-        "attachedTo": null,
-        "x": -51.69999980926514,
-        "y": 13,
-        "z": 67
+        "attachedTo": "base",
+        "x": 0,
+        "y": 10,
+        "z": 53.25
       },
       {
-        "id": "barrote-1783416401342",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
+        "id": "barrote-1783493569961",
+        "ancho": 5,
+        "alto": 4.5,
+        "largo": 131.5,
         "orient": "largo",
-        "attachedTo": null,
-        "x": 51.69999980926514,
-        "y": 13,
-        "z": 67
-      },
-      {
-        "id": "barrote-1783416420430",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "largo",
-        "attachedTo": null,
-        "x": -51.69999980926514,
-        "y": 13,
-        "z": -67
-      },
-      {
-        "id": "barrote-1783416437669",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "largo",
-        "attachedTo": null,
-        "x": 51.69999980926514,
-        "y": 13,
-        "z": -67
+        "attachedTo": "base",
+        "x": 0,
+        "y": 10,
+        "z": -53.25
       }
     ],
     "cunas": [],

@@ -56,7 +56,7 @@ export interface EscenaOpciones {
   onMoverCamion?: (paletIds: string[], nuevaX: number, nuevaY: number) => void;
   onEnviarEspera?: (paletIds: string[]) => void;
   crateGeomPorRef?: Map<string, unknown>;
-  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean }>;
+  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean }>;
   rotacionVisual?: Map<string, boolean>;
   detalle?: boolean;
   onRecuperarDeEspera?: (paletIds: string[], nuevaX: number, nuevaY: number) => void;
@@ -320,6 +320,16 @@ export function crearEscena3D(
       const rotHuella = Math.abs(sd.largoMm - pt.largoMm) > Math.abs(sd.largoMm - pt.anchoMm);
       const rotManual = rotacionVisual?.get(sd.stackKey) ?? false;
       const rotado = esCarga ? rotHuella : (esCuadrada ? rotManual : rotHuella);
+      // La geometría real ("Detalle 3D") se construye a partir del crateJson
+      // NATIVO (largo/ancho tal como se diseñó en el constructor) — pero
+      // pt.largoMm/anchoMm pueden venir YA intercambiados respecto a eso
+      // (crateToReference.ts los intercambia para bases de dobles bases con
+      // dbOrient="ancho", ver debeIntercambiarParaCamion). `rotado` compara
+      // contra esas medidas YA intercambiadas, así que si no se corrige aquí,
+      // la geometría real sale girada 90° respecto a donde está la caja
+      // simple (que si usa las medidas correctas). Un intercambio de por sí
+      // ya ES un giro de 90°, así que basta con un XOR.
+      const rotadoGeometriaReal = rotado !== (info?.intercambiado ?? false);
 
       const registrarRecursosDe = (g: THREE.Group) => {
         const rec = (g.userData as { recursos3d?: Recursos3D }).recursos3d;
@@ -334,11 +344,39 @@ export function crearEscena3D(
         const paletBaseGeom = info.paletBase ? crateGeomPorRef?.get(info.paletBase) : null;
         const paletAltoCm = paletBaseGeom ? bboxNativoCrate(paletBaseGeom).alto : 0;
         const paletAltoEsc = paletAltoCm * ESCALA * 10;
+        // Geometría PROPIA de la carga (p.ej. un marco de tablas, no
+        // necesariamente una lámina lisa) — antes se ignoraba por completo y
+        // se sustituía siempre por una caja simple, aunque tuviera diseño
+        // real detrás.
+        const geomCarga = crateGeomPorRef?.get(sd.refId);
 
-        if (geomPalet) {
-          // detalle: palet real + láminas
+        if (geomPalet && geomCarga) {
+          // detalle: palet real + N copias de la geometría real de la carga,
+          // apiladas encima (cada una empieza donde acaba la anterior).
           const cm = construirMeshCrate(THREE, geomPalet, {
-            colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotado, escala: ESCALA,
+            colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
+          });
+          registrarRecursosDe(cm);
+          cm.position.set(largoEsc / 2, localY, anchoEsc / 2);
+          cm.traverse((o: any) => { if (o.isMesh || o.isLineSegments) o.userData = { stackKey: sd.stackKey, isCargo: o.isMesh }; });
+          group.add(cm);
+
+          const cargaAltoCm = bboxNativoCrate(geomCarga).alto;
+          const cargaAltoEsc = cargaAltoCm * ESCALA * 10;
+          for (let k = 0; k < info.unidades; k++) {
+            const cL = construirMeshCrate(THREE, geomCarga, {
+              colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
+            });
+            registrarRecursosDe(cL);
+            cL.position.set(largoEsc / 2, localY + paletAltoEsc + cargaAltoEsc * k, anchoEsc / 2);
+            cL.traverse((o: any) => { if (o.isMesh || o.isLineSegments) o.userData = { stackKey: sd.stackKey, isCargo: o.isMesh }; });
+            group.add(cL);
+          }
+        } else if (geomPalet) {
+          // Solo hay geometría real del palet (la carga no trae la suya, o
+          // no se encontró): palet real + láminas simples, como antes.
+          const cm = construirMeshCrate(THREE, geomPalet, {
+            colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
             cargaEncima: { unidades: info.unidades, laminaLargoCm: info.laminaLargoCm, laminaAnchoCm: info.laminaAnchoCm, laminaAltoCm: info.laminaAltoMm / 10 },
           });
           registrarRecursosDe(cm);
@@ -346,7 +384,16 @@ export function crearEscena3D(
           cm.traverse((o: any) => { if (o.isMesh || o.isLineSegments) o.userData = { stackKey: sd.stackKey, isCargo: o.isMesh }; });
           group.add(cm);
         } else {
-          // simplificado: cubo del palet base + N cubos de lámina encima
+          // simplificado: cubo del palet base (huella completa) + N cubos de
+          // lámina encima a su tamaño PROPIO (no el de la huella del palet,
+          // que puede ser mayor) — mismo criterio que ya usa el modo detalle
+          // más arriba (cargaEncima), para que ambos modos coincidan.
+          // Si esta pila en concreto está colocada girada respecto a la
+          // orientación nativa (mismo criterio que la geometría real, ver
+          // rotadoGeometriaReal más arriba), la huella propia de la lámina
+          // también tiene que girar para no quedar desalineada del palet.
+          const laminaLargoEsc = (rotadoGeometriaReal ? info.laminaAnchoCm : info.laminaLargoCm) / 10;
+          const laminaAnchoEsc = (rotadoGeometriaReal ? info.laminaLargoCm : info.laminaAnchoCm) / 10;
           const geoP = new THREE.BoxGeometry(largoEsc * 0.95, paletAltoEsc * 0.98, anchoEsc * 0.95);
           geomsLocal.push(geoP);
           const meshP = new THREE.Mesh(geoP, matU);
@@ -359,7 +406,7 @@ export function crearEscena3D(
           bordeP.position.copy(meshP.position);
           group.add(bordeP);
           for (let i = 0; i < info.unidades; i++) {
-            const geoL = new THREE.BoxGeometry(largoEsc * 0.95, laminaAltoEsc * 0.9, anchoEsc * 0.95);
+            const geoL = new THREE.BoxGeometry(laminaLargoEsc * 0.95, laminaAltoEsc * 0.9, laminaAnchoEsc * 0.95);
             geomsLocal.push(geoL);
             const meshL = new THREE.Mesh(geoL, matU);
             meshL.position.set(largoEsc / 2, localY + paletAltoEsc + laminaAltoEsc * (i + 0.5), anchoEsc / 2);
@@ -376,7 +423,7 @@ export function crearEscena3D(
         for (let i = 0; i < palet.unidades; i++) {
           if (geomPalet) {
             const cm = construirMeshCrate(THREE, geomPalet, {
-              colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotado, escala: ESCALA,
+              colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
               desmontado: !!info?.esDesmontado,
             });
             registrarRecursosDe(cm);

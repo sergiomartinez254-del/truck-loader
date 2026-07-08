@@ -13,6 +13,7 @@ import type { PalletInstance, PalletType, Reference } from "./types";
 import { SIN_LIMITE_PESO_KG } from "./types";
 import { bboxNativoCrate } from "./crateMeshes";
 import type { Cfg } from "./crateGeometry";
+import { esRotable, debeIntercambiarParaCamion } from "./crateToReference";
 
 let contadorBulto = 0;
 function nuevoIdBulto(): string {
@@ -43,10 +44,14 @@ function medidasBulto(
     const baseAltoMm = Math.round(bb.alto * 10);
     const baseLargoMm = Math.round(bb.largo * 10);
     const baseAnchoMm = Math.round(bb.ancho * 10);
+    // La huella la manda la pieza más grande (normalmente el palet base).
+    let largoMm = Math.max(baseLargoMm, ref.largoMm);
+    let anchoMm = Math.max(baseAnchoMm, ref.anchoMm);
+    // La orientación de carga la restringe el PALET BASE (es lo que la
+    // carretilla agarra), no la lámina/carga que va encima.
+    if (debeIntercambiarParaCamion(base.crateJson)) [largoMm, anchoMm] = [anchoMm, largoMm];
     return {
-      // La huella la manda la pieza más grande (normalmente el palet base).
-      largoMm: Math.max(baseLargoMm, ref.largoMm),
-      anchoMm: Math.max(baseAnchoMm, ref.anchoMm),
+      largoMm, anchoMm,
       altoMm: baseAltoMm + ref.altoUnidadMm * flejado,
       pesoKg: Math.round(ref.pesoUnidadKg * flejado),
     };
@@ -57,15 +62,17 @@ function medidasBulto(
   // con o sin cargaEncima genérica (aro/pieza suelta que si se repite sí
   // escala con el flejado, igual que la propia unidad).
   if (ref.desmontado) {
+    let largoMm = ref.desmontado.largoMm, anchoMm = ref.desmontado.anchoMm;
+    if (debeIntercambiarParaCamion(ref.crateJson)) [largoMm, anchoMm] = [anchoMm, largoMm];
     return {
-      largoMm: ref.desmontado.largoMm,
-      anchoMm: ref.desmontado.anchoMm,
+      largoMm, anchoMm,
       altoMm: ref.desmontado.altoMm * flejado,
       pesoKg: Math.round(ref.pesoUnidadKg * flejado),
     };
   }
-  const largoMm = ref.cargaEncima ? Math.max(ref.largoMm, ref.cargaEncima.largoMm) : ref.largoMm;
-  const anchoMm = ref.cargaEncima ? Math.max(ref.anchoMm, ref.cargaEncima.anchoMm) : ref.anchoMm;
+  let largoMm = ref.cargaEncima ? Math.max(ref.largoMm, ref.cargaEncima.largoMm) : ref.largoMm;
+  let anchoMm = ref.cargaEncima ? Math.max(ref.anchoMm, ref.cargaEncima.anchoMm) : ref.anchoMm;
+  if (debeIntercambiarParaCamion(ref.crateJson)) [largoMm, anchoMm] = [anchoMm, largoMm];
   const altoPorUnidadMm = ref.altoUnidadMm + (ref.cargaEncima?.altoMm ?? 0);
   const pesoPorUnidadKg = ref.pesoUnidadKg + (ref.cargaEncima?.pesoKg ?? 0);
   return {
@@ -138,6 +145,11 @@ export function construirCargaDeCajas(
         pesoMaxKg: ref.pesoMaxApilableKg ?? SIN_LIMITE_PESO_KG,
         pesoTaraKg: 0,
       };
+      // Para tipo "carga" la rotación la restringe el PALET BASE (lo que
+      // agarra la carretilla), no la lámina/carga que va encima.
+      const crateJsonParaRotacion = (ref.tipo === "carga" && ref.paletBase)
+        ? referencias.get(ref.paletBase)?.crateJson
+        : ref.crateJson;
       const reference: Reference = {
         id: ref.id,
         sku: ref.sku,
@@ -148,6 +160,7 @@ export function construirCargaDeCajas(
         palletType,
         pesoUnitarioKg: ref.pesoUnidadKg,
         alturaPaletCompletoMm: packAltoMm, // se ajusta al máximo más abajo
+        rotable: esRotable(crateJsonParaRotacion),
       };
       refMap.set(ref.id, reference);
     }

@@ -13,7 +13,7 @@ import {
 } from "./index";
 import { crearEscena3D, type EscenaHandle, type EscenaOpciones, type PaletSeleccionado, type StagedStackInfo } from "./scene3d";
 import { cargarReferenciaDeTexto } from "./crateAdapter";
-import { crateReferenceAReference } from "./crateToReference";
+import { crateReferenceAReference, debeIntercambiarParaCamion } from "./crateToReference";
 import type { CrateReference } from "./crateTypes";
 
 // ============================================================================
@@ -25,7 +25,7 @@ const CATALOGO_BASE: Reference[] = [];
 const CANTIDADES_INICIALES: Record<string, number> = {};
 // JSON del constructor por referencia cargada (para el visor 3D real futuro).
 const crateGeomPorRef = new Map<string, unknown>();
-const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean }>();
+const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean }>();
 const crateRefsCrudas = new Map<string, CrateReference>();
 
 let customRefs: Reference[] = [];
@@ -432,10 +432,16 @@ function recomponerRefs() {
   for (const cr of crateRefsCrudas.values()) {
     try {
       customRefs.push(crateReferenceAReference(cr, crateRefsCrudas, crateGeomPorRef));
+      // Para tipo "carga" el intercambio lo marca el PALET BASE (lo que
+      // agarra la carretilla), no la lámina — igual que en crateToReference.ts.
+      const crateJsonParaIntercambio = cr.tipo === "carga" && cr.paletBase
+        ? crateRefsCrudas.get(cr.paletBase)?.crateJson
+        : cr.crateJson;
       crateInfoPorRef.set(cr.id, {
         tipo: cr.tipo, paletBase: cr.paletBase, unidades: cr.unidadesPorPack,
         laminaAltoMm: cr.altoUnidadMm, laminaLargoCm: cr.largoMm / 10, laminaAnchoCm: cr.anchoMm / 10,
         esDesmontado: !!cr.desmontado,
+        intercambiado: debeIntercambiarParaCamion(crateJsonParaIntercambio),
       });
     } catch (e) {
       console.warn(e);
@@ -852,7 +858,7 @@ function actualizarCamionActivo(mantenerSeleccion = false) {
         </div>
         ${modoManual ? `
           <div class="palet-info__actions">
-            ${!enEspera && !esBloqueado ? `
+            ${!enEspera && !esBloqueado && ref?.rotable !== false ? `
               <button class="palet-info__btn" id="btn-rotar-pila" title="Rotar la pila 90°">⟳ Rotar</button>
             ` : ""}
             <button class="palet-info__btn ${esBloqueado ? "palet-info__btn--activo" : ""}" id="btn-lock-pila">
@@ -860,7 +866,7 @@ function actualizarCamionActivo(mantenerSeleccion = false) {
             </button>
             ${esBloqueado || !enEspera ? `
               <span class="palet-info__hint">
-                ${esBloqueado ? "Posición fija — no se puede mover ni rotar" : "Arrastra al área verde para aparcar"}
+                ${esBloqueado ? "Posición fija — no se puede mover ni rotar" : ref?.rotable === false ? "Base de dobles bases — no se puede rotar" : "Arrastra al área verde para aparcar"}
               </span>
             ` : ""}
           </div>
@@ -958,6 +964,8 @@ function actualizarCamionActivo(mantenerSeleccion = false) {
 
 function rotarPila(info: PaletSeleccionado) {
   if (!resultado || info.enEspera || info.bloqueado) return;
+  const refRot = catalogoCompleto().find(r => r.id === info.refId);
+  if (refRot?.rotable === false) return; // base de dobles bases: no se puede rotar
   const camion = resultado.camiones[truckIdx];
 
   const pilaCompleta = camion.pallets.filter(p => info.paletIds.includes(p.id));

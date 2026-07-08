@@ -1,31 +1,31 @@
 {
   "meta": {
-    "sku": "9026008217",
-    "nombre": "9026008217",
-    "tipo": "palet",
-    "apilable": true,
-    "unidadesPorPack": 5,
+    "sku": "9026055600",
+    "nombre": "9026055600",
+    "tipo": "carga",
+    "apilable": false,
+    "unidadesPorPack": 6,
     "exterior": {
-      "largoCm": 141,
-      "anchoCm": 141,
-      "altoCm": 16
+      "largoCm": 83,
+      "anchoCm": 56,
+      "altoCm": 3.6
     },
     "pesoUnidadKg": 0,
-    "paletBase": null,
+    "paletBase": "9026066200",
     "cargaEncima": null,
     "desmontado": false
   },
   "crate": {
     "v": 1,
-    "largo": 141,
-    "ancho": 141,
+    "largo": 83,
+    "ancho": 56,
     "alto": 50,
     "dimMode": "interior",
     "apoyoType": "dobleBase",
-    "dbOrient": "ancho",
-    "dobleBaseAncho": 10,
-    "dobleBaseAlto": 10,
-    "claroMax": 80,
+    "dbOrient": "largo",
+    "dobleBaseAncho": 8,
+    "dobleBaseAlto": 1.8,
+    "claroMax": 125,
     "distOrillas": 0,
     "tacoLargo": 10,
     "tacoAncho": 10,
@@ -59,9 +59,9 @@
     "tapabocaGrosor": 1.8,
     "tapabocaMargen": 2,
     "cubrirType": "jaula",
-    "cubrirGrosor": 3,
-    "tablaAnchoCubrir": 7,
-    "separacionTablas": 27,
+    "cubrirGrosor": 1.8,
+    "tablaAnchoCubrir": 8,
+    "separacionTablas": 200,
     "useLados": false,
     "ladoCubrirType": "contrachapado",
     "ladoGrosor": 0.9,
@@ -153,104 +153,8 @@
     "modelMatrixGap": 0,
     "useSabana": false,
     "sabanaExtra": 20,
-    "overrides": {
-      "cubrir-3": {
-        "center": 115
-      },
-      "cubrir-1": {
-        "center": 26
-      }
-    },
-    "barrotes": [
-      {
-        "id": "barrote-1783416103754",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "ancho",
-        "attachedTo": null,
-        "x": -67,
-        "y": 13,
-        "z": 54.69999980926514
-      },
-      {
-        "id": "barrote-1783416170536",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "ancho",
-        "attachedTo": null,
-        "x": 67,
-        "y": 13,
-        "z": 54.69999980926514
-      },
-      {
-        "id": "barrote-1783416204711",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "ancho",
-        "attachedTo": null,
-        "x": -67,
-        "y": 13,
-        "z": -54.69999980926514
-      },
-      {
-        "id": "barrote-1783416341726",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "ancho",
-        "attachedTo": null,
-        "x": 67,
-        "y": 13,
-        "z": -54.69999980926514
-      },
-      {
-        "id": "barrote-1783416368965",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "largo",
-        "attachedTo": null,
-        "x": -51.69999980926514,
-        "y": 13,
-        "z": 67
-      },
-      {
-        "id": "barrote-1783416401342",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "largo",
-        "attachedTo": null,
-        "x": 51.69999980926514,
-        "y": 13,
-        "z": 67
-      },
-      {
-        "id": "barrote-1783416420430",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "largo",
-        "attachedTo": null,
-        "x": -51.69999980926514,
-        "y": 13,
-        "z": -67
-      },
-      {
-        "id": "barrote-1783416437669",
-        "ancho": 3,
-        "alto": 3,
-        "largo": 27.6,
-        "orient": "largo",
-        "attachedTo": null,
-        "x": 51.69999980926514,
-        "y": 13,
-        "z": -67
-      }
-    ],
+    "overrides": {},
+    "barrotes": [],
     "cunas": [],
     "useTiradores": false,
     "tiradorLargo": 60,

@@ -23,18 +23,27 @@ interface Orientacion {
 
 /**
  * Decide si el rectángulo (ancho x largo) cabe en el suelo del camión y, si
- * caben las dos orientaciones, elige la que permite más unidades por fila
- * (menos hueco lateral desperdiciado).
+ * caben las dos orientaciones Y el bulto se puede rotar, elige la que
+ * permite más unidades por fila (menos hueco lateral desperdiciado).
+ *
+ * Si `rotable` es false, se respeta SIEMPRE la orientación tal cual viene
+ * (largoMm/anchoMm nativos) — no se prueba la girada 90°, aunque encajara
+ * mejor. Tal cual queda su posición por defecto, sin más lógica: el propio
+ * largoMm/anchoMm exportado ya refleja la orientación correcta (viene del
+ * dbOrient con el que se construyó en el constructor).
  */
 function elegirOrientacion(
   anchoPalet: number,
   largoPalet: number,
-  truckProfile: TruckProfile
+  truckProfile: TruckProfile,
+  rotable = true
 ): Orientacion | null {
-  const opciones: Orientacion[] = [
-    { anchoOcupado: anchoPalet, largoOcupado: largoPalet },
-    { anchoOcupado: largoPalet, largoOcupado: anchoPalet },
-  ];
+  const opciones: Orientacion[] = rotable
+    ? [
+        { anchoOcupado: anchoPalet, largoOcupado: largoPalet },
+        { anchoOcupado: largoPalet, largoOcupado: anchoPalet },
+      ]
+    : [{ anchoOcupado: anchoPalet, largoOcupado: largoPalet }];
 
   const validas = opciones.filter(
     (o) =>
@@ -692,7 +701,8 @@ export function empacarPedido(
     const orientacionPosible = elegirOrientacion(
       reference.palletType.anchoMm,
       reference.palletType.largoMm,
-      truckProfile
+      truckProfile,
+      reference.rotable
     );
 
     if (!orientacionPosible) {
