@@ -35,7 +35,11 @@ export function debeIntercambiarParaCamion(crateJson: unknown): boolean {
 export function crateReferenceAReference(
   cr: CrateReference,
   refs: Map<string, CrateReference>,
-  geom: Map<string, unknown>
+  geom: Map<string, unknown>,
+  /** Sustituye cr.unidadesPorPack para esta referencia (solo tiene efecto
+   * en tipo "carga") — deja personalizar cuántas unidades trae cada pack,
+   * en vez del número fijo que venía en el JSON exportado. */
+  unidadesPorPackOverride?: number
 ): Reference {
   // Caso CARGA: palet base (geometría real) + torre de N láminas encima
   if (cr.tipo === "carga" && cr.paletBase) {
@@ -48,11 +52,12 @@ export function crateReferenceAReference(
     const basePaletAltoMm = Math.round(bb.alto * 10);
     const basePaletLargoMm = Math.round(bb.largo * 10);
     const basePaletAnchoMm = Math.round(bb.ancho * 10);
+    const unidadesPorPack = unidadesPorPackOverride ?? cr.unidadesPorPack;
 
     // Exterior = max por eje (palet vs lámina); alto = palet + N×lámina
     let largoMm = Math.max(basePaletLargoMm, cr.largoMm);
     let anchoMm = Math.max(basePaletAnchoMm, cr.anchoMm);
-    const packAltoMm = Math.round(basePaletAltoMm + cr.altoUnidadMm * cr.unidadesPorPack);
+    const packAltoMm = Math.round(basePaletAltoMm + cr.altoUnidadMm * unidadesPorPack);
 
     // La rotación y la orientación de carga las restringe el PALET BASE (es
     // lo que la carretilla agarra), no la lámina/carga que va encima.
@@ -60,7 +65,7 @@ export function crateReferenceAReference(
 
     return {
       id: cr.id, sku: cr.sku, nombre: cr.nombre,
-      unidadesPorPalet: cr.unidadesPorPack, loteMinimo: 1,
+      unidadesPorPalet: unidadesPorPack, loteMinimo: 1,
       apilable: cr.apilable,
       palletType: {
         id: `pt-${cr.id}`, nombre: `Bulto ${cr.sku}`,

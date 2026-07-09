@@ -1,32 +1,32 @@
 {
   "meta": {
-    "sku": "9026005431",
-    "nombre": "9026005431",
-    "tipo": "carga",
+    "sku": "9200023701",
+    "nombre": "9200023701",
+    "tipo": "palet",
     "apilable": true,
-    "unidadesPorPack": 30,
+    "unidadesPorPack": 5,
     "exterior": {
-      "largoCm": 94.5,
-      "anchoCm": 94.5,
-      "altoCm": 2.6
+      "largoCm": 20,
+      "anchoCm": 5,
+      "altoCm": 4
     },
     "pesoUnidadKg": 0,
-    "paletBase": "9026066200",
+    "paletBase": null,
     "cargaEncima": null,
     "desmontado": false
   },
   "crate": {
     "v": 1,
-    "largo": 94.5,
-    "ancho": 94.5,
-    "alto": 0,
+    "largo": 20,
+    "ancho": 5,
+    "alto": 4,
     "dimMode": "interior",
     "apoyoType": "dobleBase",
     "dbOrient": "ancho",
     "dobleBaseAncho": 0,
     "dobleBaseAlto": 0,
     "claroMax": 125,
-    "distOrillas": 19,
+    "distOrillas": 4,
     "tacoLargo": 10,
     "tacoAncho": 10,
     "tacoAlto": 10,
@@ -59,7 +59,7 @@
     "tapabocaGrosor": 1.8,
     "tapabocaMargen": 2,
     "cubrirType": "contrachapado",
-    "cubrirGrosor": 2.6,
+    "cubrirGrosor": 4,
     "tablaAnchoCubrir": 10,
     "separacionTablas": 15,
     "useLados": false,
@@ -172,6 +172,9 @@
     "forradoLados": false,
     "forradoTesteros": false,
     "forradoTapa": false,
-    "hiddenPieces": {}
+    "hiddenPieces": {
+      "db-0": true,
+      "db-1": true
+    }
   }
 }

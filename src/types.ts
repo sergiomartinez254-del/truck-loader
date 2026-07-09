@@ -64,6 +64,15 @@ export interface TruckProfile {
   anchoInteriorMm: number;
   altoInteriorMm: number;
   pesoMaxKg: number;
+  /**
+   * Si el camión admite carga lateral (además de por la puerta trasera). Con
+   * carga trasera únicamente, un bulto no rotable (p.ej. base de dobles
+   * bases) debe respetar siempre su orientación de fábrica — solo puede
+   * entrar la carretilla por un lado. Si también admite carga lateral, da
+   * igual la orientación: se puede colocar girado, así que el packer puede
+   * rotar libremente cualquier bulto sin mirar `reference.rotable`.
+   */
+  cargaLateral?: boolean;
 }
 
 /** Línea de pedido: cuánto se pide de cada referencia */

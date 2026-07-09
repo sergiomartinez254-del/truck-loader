@@ -64,12 +64,15 @@ let pilaSeleccionada: PaletSeleccionado | null = null;
 // ── Estado de posiciones bloqueadas ──────────────────────────────────────────
 interface StackBloqueado {
   stackKey: string;
-  refId: string;
+  refId: string; // referencia de la base (nivel 0) — para mostrar/identificar la columna
   truckX: number;
   truckY: number;
   anchoMm: number;
   largoMm: number;
-  unidades: number;
+  /** Unidades por CADA referencia presente en la columna (puede haber más de
+   * una si hay apilado manual entre referencias distintas) — hace falta
+   * desglosado así para descontar correctamente de cada línea de pedido. */
+  unidadesPorRef: Record<string, number>;
   palets: PlacedPallet[];
 }
 const stacksBloqueados = new Map<string, StackBloqueado>(); // key = stackKey
@@ -87,6 +90,24 @@ interface StagedStack {
   slotIdx: number;
 }
 let stagedStacks: StagedStack[] = [];
+
+// Compatibilidad de apilado MANUAL entre referencias distintas: pares
+// dirigidos "A puede ir encima de B" (no implica lo contrario). Solo afecta
+// a arrastrar una pila sobre otra ya puesta — el packer automático sigue
+// apilando únicamente unidades de la misma referencia, como hasta ahora.
+let apilableSobre: Record<string, string[]> = {};
+function puedeApilarManual(refArriba: string, refAbajo: string): boolean {
+  if (refArriba === refAbajo) return false; // eso ya lo decide "apilable" + el packer automático
+  return (apilableSobre[refArriba] ?? []).includes(refAbajo);
+}
+
+// Personalización de unidades por pack para referencias tipo "carga" — por
+// defecto se usa el número fijo que trae el JSON (cr.unidadesPorPack), pero
+// se puede sobrescribir por referencia. Al cambiarlo, si la cantidad
+// pedida no es múltiplo exacto, se reparte en un pack completo + uno
+// parcial con el resto (mismo criterio que ya usa cualquier otra
+// referencia al pedir más de lo que cabe en un palet).
+const unidadesCargaOverride = new Map<string, number>();
 let nextStagedSlot = 0;
 
 // ============================================================================
@@ -152,6 +173,18 @@ document.getElementById("app")!.innerHTML = `
         </div>
       </div>
 
+      <!-- Apilado manual entre referencias distintas -->
+      <div class="panel">
+        <h2>Apilado manual entre referencias</h2>
+        <p class="auto-hint">Declara qué referencia se puede arrastrar encima de cuál (no afecta al cálculo automático, solo a cuando arrastras una pila sobre otra ya puesta).</p>
+        <div class="custom-ref-row">
+          <label class="field field--wide"><span>Arriba</span><select id="ap-arriba"></select></label>
+          <label class="field field--wide"><span>Puede ir sobre</span><select id="ap-abajo"></select></label>
+        </div>
+        <button class="btn-add-ref" id="btn-add-apilable">+ Añadir regla</button>
+        <div id="apilable-lista"></div>
+      </div>
+
       <!-- Avisos lote mínimo -->
       <div class="avisos" id="avisos-lote"></div>
 
@@ -165,6 +198,10 @@ document.getElementById("app")!.innerHTML = `
           <label class="field"><span>Alto interior (cm)</span><input type="number" id="truck-alto" value="${truckProfile.altoInteriorMm/10}"/></label>
           <label class="field"><span>Peso máx. (kg)</span><input type="number" id="truck-peso" value="${truckProfile.pesoMaxKg}"/></label>
         </div>
+        <label class="checkbox-field">
+          <input type="checkbox" id="cb-carga-lateral"/>
+          <span>Admite carga lateral (si no, solo por la puerta trasera)</span>
+        </label>
         <label class="checkbox-field">
           <input type="checkbox" id="cb-varios"/>
           <span>Permitir repartir en varios camiones</span>
@@ -233,6 +270,8 @@ interface EstadoPersistido {
   detalle3D: boolean;
   crateRefsCrudas: CrateReference[];
   refsManuales: Reference[];
+  apilableSobre: Record<string, string[]>;
+  unidadesCargaOverride: Record<string, number>;
   colores: Record<string, string>;
   stacksBloqueados: StackBloqueado[];
   stagedStacks: StagedStack[];
@@ -248,6 +287,8 @@ function guardarEstadoInmediato() {
     detalle3D,
     crateRefsCrudas: Array.from(crateRefsCrudas.values()),
     refsManuales,
+    apilableSobre,
+    unidadesCargaOverride: Object.fromEntries(unidadesCargaOverride),
     colores: Object.fromEntries(colorPorRef),
     stacksBloqueados: Array.from(stacksBloqueados.values()),
     stagedStacks,
@@ -289,6 +330,8 @@ function restaurarEstadoGuardado(): boolean {
     crateGeomPorRef.set(cr.id, cr.crateJson);
   }
   refsManuales = estado.refsManuales ?? [];
+  apilableSobre = estado.apilableSobre ?? {};
+  for (const [id, n] of Object.entries(estado.unidadesCargaOverride ?? {})) unidadesCargaOverride.set(id, n);
   for (const r of refsManuales) colorDe(r.id);
   for (const [id, color] of Object.entries(estado.colores ?? {})) {
     colorPorRef.set(id, color);
@@ -297,6 +340,10 @@ function restaurarEstadoGuardado(): boolean {
   permitirVarios = !!estado.permitirVarios;
   detalle3D = !!estado.detalle3D;
   for (const sb of estado.stacksBloqueados ?? []) {
+    // Compatibilidad con guardados antiguos (refId+unidades sueltos, de
+    // cuando una columna solo podía ser de una referencia).
+    const sbAny = sb as StackBloqueado & { unidades?: number };
+    if (!sbAny.unidadesPorRef) sbAny.unidadesPorRef = { [sbAny.refId]: sbAny.unidades ?? 0 };
     stacksBloqueados.set(sb.stackKey, sb);
   }
   stagedStacks = estado.stagedStacks ?? [];
@@ -309,6 +356,7 @@ function restaurarEstadoGuardado(): boolean {
   (document.getElementById("truck-ancho") as HTMLInputElement).value = String(truckProfile.anchoInteriorMm / 10);
   (document.getElementById("truck-alto")  as HTMLInputElement).value = String(truckProfile.altoInteriorMm / 10);
   (document.getElementById("truck-peso")  as HTMLInputElement).value = String(truckProfile.pesoMaxKg);
+  (document.getElementById("cb-carga-lateral") as HTMLInputElement).checked = !!truckProfile.cargaLateral;
   (document.getElementById("cb-varios")   as HTMLInputElement).checked = permitirVarios;
   (document.getElementById("cb-detalle")  as HTMLInputElement).checked = detalle3D;
   actualizarMeta();
@@ -338,7 +386,9 @@ function renderOrderRows() {
   // Unidades bloqueadas por referencia (no se puede pedir menos de esto)
   const lockedByRef = new Map<string, number>();
   for (const sb of stacksBloqueados.values()) {
-    lockedByRef.set(sb.refId, (lockedByRef.get(sb.refId) ?? 0) + sb.unidades);
+    for (const [refId, unidades] of Object.entries(sb.unidadesPorRef)) {
+      lockedByRef.set(refId, (lockedByRef.get(refId) ?? 0) + unidades);
+    }
   }
 
   orderRowsEl.innerHTML = catalogoCompleto().map(ref => {
@@ -349,6 +399,7 @@ function renderOrderRows() {
     const v   = locked > 0 ? Math.max(raw, locked) : raw;
     const esCustom = customRefs.some(r => r.id === ref.id) || refsManuales.some(r => r.id === ref.id);
     const esDesmontado = crateInfoPorRef.get(ref.id)?.esDesmontado;
+    const esCarga = crateInfoPorRef.get(ref.id)?.tipo === "carga";
     return `
       <div class="order-row" data-refid="${ref.id}">
         <div class="order-row__color" style="background:${colorDe(ref.id)}"></div>
@@ -356,11 +407,29 @@ function renderOrderRows() {
           <span class="order-row__sku">${ref.sku}${locked > 0 ? ` <span class="lock-badge" title="${locked} ud fijadas">🔒</span>` : ""}${esDesmontado ? ` <span class="lock-badge" title="Se transporta desmontada (paneles planos)">📦</span>` : ""}</span>
           <span class="order-row__nombre">${ref.nombre}</span>
           <span class="order-row__detalle">${ref.unidadesPorPalet}ud/pal · lote≥${ref.loteMinimo} · ${ref.palletType.largoMm/10}×${ref.palletType.anchoMm/10}×${ref.alturaPaletCompletoMm/10}cm${ref.apilable?"":" · NO apilable"}</span>
+          ${esCarga ? `
+            <label style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-dim, #999); margin-top:2px;" title="Unidades por pack — sustituye al número fijo del JSON exportado">
+              <span>ud/pack:</span>
+              <input type="number" min="1" step="1" data-override-unidades="${ref.id}" value="${unidadesCargaOverride.get(ref.id) ?? ref.unidadesPorPalet}" style="width:52px; font-size:10px; padding:1px 4px;"/>
+            </label>
+          ` : ""}
         </div>
         <input type="number" min="${minVal}" step="${ref.unidadesPorPalet}" data-ref="${ref.id}" value="${v}"/>
         ${esCustom ? `<button class="btn-remove-ref" data-remove="${ref.id}" title="Eliminar">×</button>` : "<span></span>"}
       </div>`;
   }).join("");
+
+  orderRowsEl.querySelectorAll<HTMLInputElement>("input[data-override-unidades]").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const id = inp.dataset.overrideUnidades!;
+      const n = Math.max(1, Math.round(Number(inp.value)));
+      unidadesCargaOverride.set(id, n);
+      recomponerRefs();
+      renderOrderRows();
+      planAuto();
+      guardarEstadoDebounced();
+    });
+  });
 
   orderRowsEl.querySelectorAll<HTMLInputElement>("input[data-ref]").forEach(inp => {
     inp.addEventListener("input", () => {
@@ -386,7 +455,61 @@ function renderOrderRows() {
       recomponerRefs();
     });
   });
+  renderApilamientoPanel();
 }
+
+function renderApilamientoPanel() {
+  const catalogo = catalogoCompleto();
+  const selArriba = document.getElementById("ap-arriba") as HTMLSelectElement;
+  const selAbajo = document.getElementById("ap-abajo") as HTMLSelectElement;
+  const opciones = catalogo.map(r => `<option value="${r.id}">${r.sku}</option>`).join("");
+  const prevArriba = selArriba.value, prevAbajo = selAbajo.value;
+  selArriba.innerHTML = opciones;
+  selAbajo.innerHTML = opciones;
+  if (catalogo.some(r => r.id === prevArriba)) selArriba.value = prevArriba;
+  if (catalogo.some(r => r.id === prevAbajo)) selAbajo.value = prevAbajo;
+
+  const listaEl = document.getElementById("apilable-lista")!;
+  const filas: string[] = [];
+  for (const [arriba, abajos] of Object.entries(apilableSobre)) {
+    const refArriba = catalogo.find(r => r.id === arriba);
+    for (const abajo of abajos) {
+      const refAbajo = catalogo.find(r => r.id === abajo);
+      filas.push(`
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; margin-top:6px; background:var(--input-bg);">
+          <span style="font-size:12px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <strong>${refArriba?.sku ?? arriba}</strong>
+            <span style="opacity:0.6"> sobre </span>
+            <strong>${refAbajo?.sku ?? abajo}</strong>
+          </span>
+          <button class="btn-remove-ref" data-remove-apilable="${arriba}|${abajo}" title="Eliminar" style="flex-shrink:0;">×</button>
+        </div>`);
+    }
+  }
+  listaEl.innerHTML = filas.join("") || `<p class="auto-hint">Sin reglas todavía.</p>`;
+  listaEl.querySelectorAll<HTMLButtonElement>("[data-remove-apilable]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const [arriba, abajo] = btn.dataset.removeApilable!.split("|");
+      const restantes = (apilableSobre[arriba] ?? []).filter(x => x !== abajo);
+      apilableSobre = { ...apilableSobre };
+      if (restantes.length === 0) delete apilableSobre[arriba];
+      else apilableSobre[arriba] = restantes;
+      renderApilamientoPanel();
+      guardarEstadoDebounced();
+    });
+  });
+}
+document.getElementById("btn-add-apilable")!.addEventListener("click", () => {
+  const arriba = (document.getElementById("ap-arriba") as HTMLSelectElement).value;
+  const abajo = (document.getElementById("ap-abajo") as HTMLSelectElement).value;
+  if (!arriba || !abajo || arriba === abajo) return;
+  const actuales = apilableSobre[arriba] ?? [];
+  if (!actuales.includes(abajo)) {
+    apilableSobre = { ...apilableSobre, [arriba]: [...actuales, abajo] };
+    renderApilamientoPanel();
+    guardarEstadoDebounced();
+  }
+});
 renderOrderRows();
 
 // ============================================================================
@@ -431,7 +554,7 @@ function recomponerRefs() {
   crateInfoPorRef.clear();
   for (const cr of crateRefsCrudas.values()) {
     try {
-      customRefs.push(crateReferenceAReference(cr, crateRefsCrudas, crateGeomPorRef));
+      customRefs.push(crateReferenceAReference(cr, crateRefsCrudas, crateGeomPorRef, unidadesCargaOverride.get(cr.id)));
       // Para tipo "carga" el intercambio lo marca el PALET BASE (lo que
       // agarra la carretilla), no la lámina — igual que en crateToReference.ts.
       const crateJsonParaIntercambio = cr.tipo === "carga" && cr.paletBase
@@ -567,6 +690,12 @@ if (restaurarEstadoGuardado()) {
   });
 });
 
+(document.getElementById("cb-carga-lateral") as HTMLInputElement).addEventListener("change", e => {
+  truckProfile = { ...truckProfile, cargaLateral: (e.target as HTMLInputElement).checked };
+  guardarEstadoDebounced();
+  planAuto();
+});
+
 (document.getElementById("cb-varios") as HTMLInputElement).addEventListener("change", e => {
   permitirVarios = (e.target as HTMLInputElement).checked;
   planAuto();
@@ -610,7 +739,9 @@ function planificar() {
   const unidadesBloqPorRef = new Map<string, number>();
   const obstaculos: ObstaculoPlanta[] = [];
   for (const sb of stacksBloqueados.values()) {
-    unidadesBloqPorRef.set(sb.refId, (unidadesBloqPorRef.get(sb.refId) ?? 0) + sb.unidades);
+    for (const [refId, unidades] of Object.entries(sb.unidadesPorRef)) {
+      unidadesBloqPorRef.set(refId, (unidadesBloqPorRef.get(refId) ?? 0) + unidades);
+    }
     obstaculos.push({ x: sb.truckX, y: sb.truckY, anchoMm: sb.anchoMm, largoMm: sb.largoMm });
   }
   // ── Deducir unidades en zona de espera ────────────────────────────────────
@@ -858,7 +989,7 @@ function actualizarCamionActivo(mantenerSeleccion = false) {
         </div>
         ${modoManual ? `
           <div class="palet-info__actions">
-            ${!enEspera && !esBloqueado && ref?.rotable !== false ? `
+            ${!enEspera && !esBloqueado && (ref?.rotable !== false || truckProfile.cargaLateral) ? `
               <button class="palet-info__btn" id="btn-rotar-pila" title="Rotar la pila 90°">⟳ Rotar</button>
             ` : ""}
             <button class="palet-info__btn ${esBloqueado ? "palet-info__btn--activo" : ""}" id="btn-lock-pila">
@@ -866,7 +997,7 @@ function actualizarCamionActivo(mantenerSeleccion = false) {
             </button>
             ${esBloqueado || !enEspera ? `
               <span class="palet-info__hint">
-                ${esBloqueado ? "Posición fija — no se puede mover ni rotar" : ref?.rotable === false ? "Base de dobles bases — no se puede rotar" : "Arrastra al área verde para aparcar"}
+                ${esBloqueado ? "Posición fija — no se puede mover ni rotar" : (ref?.rotable === false && !truckProfile.cargaLateral) ? "Base de dobles bases — no se puede rotar (el camión no admite carga lateral)" : "Arrastra al área verde para aparcar"}
               </span>
             ` : ""}
           </div>
@@ -920,6 +1051,40 @@ function actualizarCamionActivo(mantenerSeleccion = false) {
       actualizarPlano2D(camion);
       guardarEstadoDebounced();
     },
+
+    onComprobarApilableManual(refArriba, refAbajo) {
+      return puedeApilarManual(refArriba, refAbajo);
+    },
+
+    onApilarManual(_paletIds, objetivoPaletId, _nuevoZ, _nuevoNivel) {
+      // Fijar automáticamente la columna resultante (como si el usuario
+      // hubiera pulsado "Fijar posición") para que sobreviva a futuros
+      // replanteos — si no, el packer automático la deshace en cuanto se
+      // añade una referencia nueva o se recalcula, porque no sabe que ahí
+      // hay un apilado manual entre referencias distintas.
+      const objetivo = camion.pallets.find(p => p.id === objetivoPaletId);
+      if (objetivo) {
+        const columnaCompleta = camion.pallets.filter(p => p.x === objetivo.x && p.y === objetivo.y);
+        const base = columnaCompleta.find(p => p.nivel === 0) ?? columnaCompleta[0];
+        const currentKey = `${base.x}-${base.y}`;
+        const unidadesPorRef: Record<string, number> = {};
+        for (const p of columnaCompleta) {
+          unidadesPorRef[p.referenceId] = (unidadesPorRef[p.referenceId] ?? 0) + p.unidades;
+        }
+        stacksBloqueados.set(currentKey, {
+          stackKey: currentKey,
+          refId: base.referenceId,
+          truckX: base.x, truckY: base.y,
+          anchoMm: base.anchoOcupadoMm, largoMm: base.largoOcupadoMm,
+          unidadesPorRef,
+          palets: columnaCompleta.map(p => ({ ...p })),
+        });
+      }
+      actualizarPlano2D(camion);
+      guardarEstadoDebounced();
+      actualizarCamionActivo(true);
+      renderOrderRows();
+    },
   };
 
   // Reutilizar la escena existente (misma cámara, mismo renderer, sin
@@ -965,7 +1130,7 @@ function actualizarCamionActivo(mantenerSeleccion = false) {
 function rotarPila(info: PaletSeleccionado) {
   if (!resultado || info.enEspera || info.bloqueado) return;
   const refRot = catalogoCompleto().find(r => r.id === info.refId);
-  if (refRot?.rotable === false) return; // base de dobles bases: no se puede rotar
+  if (refRot?.rotable === false && !truckProfile.cargaLateral) return; // base de dobles bases sin carga lateral: no se puede rotar
   const camion = resultado.camiones[truckIdx];
 
   const pilaCompleta = camion.pallets.filter(p => info.paletIds.includes(p.id));
@@ -1038,6 +1203,10 @@ function toggleBloqueoPila(info: PaletSeleccionado) {
   if (stacksBloqueados.has(currentKey)) {
     stacksBloqueados.delete(currentKey);
   } else {
+    const unidadesPorRef: Record<string, number> = {};
+    for (const p of pilaCompleta) {
+      unidadesPorRef[p.referenceId] = (unidadesPorRef[p.referenceId] ?? 0) + p.unidades;
+    }
     stacksBloqueados.set(currentKey, {
       stackKey: currentKey,
       refId: base.referenceId,
@@ -1045,7 +1214,7 @@ function toggleBloqueoPila(info: PaletSeleccionado) {
       truckY: base.y,
       anchoMm: base.anchoOcupadoMm,
       largoMm: base.largoOcupadoMm,
-      unidades: pilaCompleta.reduce((s, p) => s + p.unidades, 0),
+      unidadesPorRef,
       palets: pilaCompleta.map(p => ({ ...p })),   // deep-copy
     });
   }

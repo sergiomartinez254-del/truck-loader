@@ -12,7 +12,8 @@
     },
     "pesoUnidadKg": 0,
     "paletBase": "9026066200",
-    "cargaEncima": null
+    "cargaEncima": null,
+    "desmontado": false
   },
   "crate": {
     "v": 1,
@@ -22,8 +23,8 @@
     "dimMode": "interior",
     "apoyoType": "dobleBase",
     "dbOrient": "ancho",
-    "dobleBaseAncho": 10,
-    "dobleBaseAlto": 7,
+    "dobleBaseAncho": 0,
+    "dobleBaseAlto": 0,
     "claroMax": 125,
     "distOrillas": 20,
     "tacoLargo": 10,
@@ -78,7 +79,8 @@
     "tapaSeparacion": 15,
     "tapaCubrirOrient": "largo",
     "caraDominante": "lado",
-    "cargamento": "none",
+    "cargamentoCubrir": "none",
+    "cargamentoLlap": "none",
     "useVentilacion": false,
     "ventilacionPares": 0,
     "apoyoLado": "cubrir",
@@ -87,6 +89,8 @@
     "splitApoyoTestero": false,
     "apoyoLadoLlap": "cubrir",
     "apoyoTesteroLlap": "cubrir",
+    "apoyoLadoLlapIncl": "cubrir",
+    "apoyoTesteroLlapIncl": "cubrir",
     "cantoneraCadena": false,
     "useCuadradillos": false,
     "cuadradilloAncho": 10,
@@ -118,6 +122,10 @@
     "recuadroTesteroClaro": 65,
     "llapInclinadaLadoCount": 2,
     "llapInclinadaTesteroCount": 2,
+    "llapInclinadaLadoIgual": false,
+    "llapInclinadaTesteroIgual": false,
+    "llapInclinadaLadoClavada": false,
+    "llapInclinadaTesteroClavada": false,
     "useLlapasasTapa": false,
     "llapTapaOrient": "largo",
     "llapTapaAncho": 8,
@@ -164,9 +172,6 @@
     "forradoLados": false,
     "forradoTesteros": false,
     "forradoTapa": false,
-    "hiddenPieces": {
-      "db-1": true,
-      "db-0": true
-    }
+    "hiddenPieces": {}
   }
 }

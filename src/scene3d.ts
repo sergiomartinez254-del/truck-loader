@@ -55,6 +55,10 @@ export interface EscenaOpciones {
   onSeleccion?: (info: PaletSeleccionado | null) => void;
   onMoverCamion?: (paletIds: string[], nuevaX: number, nuevaY: number) => void;
   onEnviarEspera?: (paletIds: string[]) => void;
+  /** Comprueba si `refArriba` se puede apilar manualmente sobre `refAbajo` (pares dirigidos, definidos por el usuario). */
+  onComprobarApilableManual?: (refArriba: string, refAbajo: string) => boolean;
+  /** Aterriza `paletIds` justo encima del palet `objetivoPaletId`, al nuevo z/nivel indicados. */
+  onApilarManual?: (paletIds: string[], objetivoPaletId: string, nuevoZ: number, nuevoNivel: number) => void;
   crateGeomPorRef?: Map<string, unknown>;
   crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean }>;
   rotacionVisual?: Map<string, boolean>;
@@ -136,6 +140,8 @@ export function crearEscena3D(
   let opciones = opcionesIniciales ?? {};
   let onSeleccion = opciones.onSeleccion;
   let onMoverCamion = opciones.onMoverCamion;
+  let onComprobarApilableManual = opciones.onComprobarApilableManual;
+  let onApilarManual = opciones.onApilarManual;
   let onEnviarEspera = opciones.onEnviarEspera;
   let onRecuperarDeEspera = opciones.onRecuperarDeEspera;
   let crateGeomPorRef = opciones.crateGeomPorRef;
@@ -278,9 +284,6 @@ export function crearEscena3D(
   ): THREE.Group {
     const geomsLocal: THREE.BufferGeometry[] = [];
     const matsLocal: THREE.Material[] = [];
-    const colorHex = colorPorReferencia.get(sd.refId) ?? "#4fd1c5";
-    const largoEsc = sd.largoMm * ESCALA;
-    const anchoEsc = sd.anchoMm * ESCALA;
 
     const group = new THREE.Group();
     group.position.set(threeX, 0, threeZ);
@@ -288,6 +291,15 @@ export function crearEscena3D(
 
     let localY = 0;
     for (const palet of [...paletsPila].sort((a, b) => a.nivel - b.nivel)) {
+      // Cada nivel usa SU PROPIA referencia (color, geometría, medidas) — no
+      // la de sd/paletsPila[0]. Antes daba igual (una pila siempre era una
+      // sola referencia, apilada por el packer automático), pero con el
+      // apilado manual entre referencias distintas cada nivel puede ser una
+      // referencia diferente, y si no se coge aquí bien, la de arriba
+      // "absorbe" el aspecto de la de abajo (o al revés).
+      const colorHex = colorPorReferencia.get(palet.referenceId) ?? "#4fd1c5";
+      const largoEsc = palet.largoOcupadoMm * ESCALA;
+      const anchoEsc = palet.anchoOcupadoMm * ESCALA;
       const altUnd = Math.max((palet.alturaMm / palet.unidades) * ESCALA, 0.01);
       const geoU = new THREE.BoxGeometry(largoEsc * 0.95, altUnd * 0.92, anchoEsc * 0.95);
       const geoB = new THREE.EdgesGeometry(geoU);
@@ -301,14 +313,15 @@ export function crearEscena3D(
       const matB = new THREE.LineBasicMaterial({ color: 0x0a1410, transparent: true, opacity: 0.4 });
       matsLocal.push(matU, matB);
 
-      const info = crateInfoPorRef?.get(sd.refId);
+      const info = crateInfoPorRef?.get(palet.referenceId);
       const esCarga = info?.tipo === "carga";
       const geomPalet = detalle
-        ? (esCarga && info?.paletBase ? crateGeomPorRef?.get(info.paletBase) : crateGeomPorRef?.get(sd.refId))
+        ? (esCarga && info?.paletBase ? crateGeomPorRef?.get(info.paletBase) : crateGeomPorRef?.get(palet.referenceId))
         : null;
-      const pt = paletsPila[0].palletType;
+      const pt = palet.palletType;
       // rotHuella detecta el giro comparando las medidas YA intercambiadas
-      // (sd.largoMm/anchoMm, iguales a las que usan el marco y el plano 2D)
+      // (las de ESTE nivel — no las de sd/toda la pila, que con apilado
+      // manual entre referencias distintas puede tener otra huella)
       // contra las medidas canónicas del tipo de palet: ya refleja cualquier
       // giro, sea el que eligió el packer por defecto o el que acaba de hacer
       // el usuario a mano (rotarPila intercambia esas mismas medidas).
@@ -317,7 +330,7 @@ export function crearEscena3D(
       // que la comparación de medidas no puede decir nada y hace falta el
       // flag explícito para saber hacia qué lado está girada la pieza.
       const esCuadrada = pt.largoMm === pt.anchoMm;
-      const rotHuella = Math.abs(sd.largoMm - pt.largoMm) > Math.abs(sd.largoMm - pt.anchoMm);
+      const rotHuella = Math.abs(palet.largoOcupadoMm - pt.largoMm) > Math.abs(palet.largoOcupadoMm - pt.anchoMm);
       const rotManual = rotacionVisual?.get(sd.stackKey) ?? false;
       const rotado = esCarga ? rotHuella : (esCuadrada ? rotManual : rotHuella);
       // La geometría real ("Detalle 3D") se construye a partir del crateJson
@@ -348,7 +361,7 @@ export function crearEscena3D(
         // necesariamente una lámina lisa) — antes se ignoraba por completo y
         // se sustituía siempre por una caja simple, aunque tuviera diseño
         // real detrás.
-        const geomCarga = crateGeomPorRef?.get(sd.refId);
+        const geomCarga = crateGeomPorRef?.get(palet.referenceId);
 
         if (geomPalet && geomCarga) {
           // detalle: palet real + N copias de la geometría real de la carga,
@@ -363,7 +376,7 @@ export function crearEscena3D(
 
           const cargaAltoCm = bboxNativoCrate(geomCarga).alto;
           const cargaAltoEsc = cargaAltoCm * ESCALA * 10;
-          for (let k = 0; k < info.unidades; k++) {
+          for (let k = 0; k < palet.unidades; k++) {
             const cL = construirMeshCrate(THREE, geomCarga, {
               colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
             });
@@ -377,7 +390,7 @@ export function crearEscena3D(
           // no se encontró): palet real + láminas simples, como antes.
           const cm = construirMeshCrate(THREE, geomPalet, {
             colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
-            cargaEncima: { unidades: info.unidades, laminaLargoCm: info.laminaLargoCm, laminaAnchoCm: info.laminaAnchoCm, laminaAltoCm: info.laminaAltoMm / 10 },
+            cargaEncima: { unidades: palet.unidades, laminaLargoCm: info.laminaLargoCm, laminaAnchoCm: info.laminaAnchoCm, laminaAltoCm: info.laminaAltoMm / 10 },
           });
           registrarRecursosDe(cm);
           cm.position.set(largoEsc / 2, localY, anchoEsc / 2);
@@ -405,7 +418,7 @@ export function crearEscena3D(
           const bordeP = new THREE.LineSegments(edgesP, matB);
           bordeP.position.copy(meshP.position);
           group.add(bordeP);
-          for (let i = 0; i < info.unidades; i++) {
+          for (let i = 0; i < palet.unidades; i++) {
             const geoL = new THREE.BoxGeometry(laminaLargoEsc * 0.95, laminaAltoEsc * 0.9, laminaAnchoEsc * 0.95);
             geomsLocal.push(geoL);
             const meshL = new THREE.Mesh(geoL, matU);
@@ -679,6 +692,46 @@ export function crearEscena3D(
     return false;
   }
 
+  /**
+   * Busca si el rectángulo de destino (x,y,anchoMm,largoMm) se solapa
+   * sustancialmente con una columna existente (nivel 0 y lo que tenga
+   * apilado encima) — "aquí se puede aterrizar justo encima". No exige que
+   * la posición coincida al milímetro (el packer automático no snapea a la
+   * rejilla de 50mm del arrastre): basta con que el solape sea la mayor
+   * parte de la huella que se está soltando. Devuelve la posición EXACTA
+   * de la columna objetivo (no la del arrastre) para que el aterrizaje
+   * quede perfectamente alineado, junto con el palet que está arriba del
+   * todo ahora mismo y dónde (x/y/z/nivel) aterrizaría uno nuevo.
+   */
+  function buscarObjetivoApilado(excludeIds: Set<string>, x: number, y: number, anchoMm: number, largoMm: number) {
+    let mejor: PlacedPallet | null = null;
+    let mejorSolape = 0;
+    for (const p of paletsMutable) {
+      if (p.nivel !== 0 || excludeIds.has(p.id)) continue;
+      const ox = Math.min(x + anchoMm, p.x + p.anchoOcupadoMm) - Math.max(x, p.x);
+      const oy = Math.min(y + largoMm, p.y + p.largoOcupadoMm) - Math.max(y, p.y);
+      if (ox <= 0 || oy <= 0) continue;
+      const solape = ox * oy;
+      if (solape > mejorSolape) { mejorSolape = solape; mejor = p; }
+    }
+    if (!mejor) return null;
+    // Exige que el solape cubra la mayor parte de lo que se suelta —
+    // si solo roza una esquina al pasar por encima, no cuenta.
+    if (mejorSolape < 0.6 * anchoMm * largoMm) return null;
+
+    const columna = paletsMutable.filter(p => p.x === mejor!.x && p.y === mejor!.y && !excludeIds.has(p.id));
+    let top = columna[0];
+    for (const p of columna) {
+      if (p.nivel > top.nivel) top = p;
+    }
+    return {
+      paletId: top.id, refId: top.referenceId,
+      aterrizarX: mejor.x, aterrizarY: mejor.y,
+      nuevoZ: top.z + top.alturaMm, nuevoNivel: top.nivel + 1,
+      anchoOcupadoMm: top.anchoOcupadoMm, largoOcupadoMm: top.largoOcupadoMm,
+    };
+  }
+
   function setColorPila(g: THREE.Group, hex: number, alpha = 1) {
     g.children.forEach(c => {
       if (c instanceof THREE.Mesh && c.userData.isCargo) {
@@ -714,6 +767,7 @@ export function crearEscena3D(
   let dragCurrentTruckY = 0;
   let dragTargetEspera = false;
   let dragHasCollision = false;
+  let dragObjetivoApilado: { paletId: string; refId: string; nuevoZ: number; nuevoNivel: number } | null = null;
 
   const dragStartIntersect = new THREE.Vector3();
   const dragOriginalPos    = new THREE.Vector3();
@@ -736,6 +790,22 @@ export function crearEscena3D(
           quitarOutline(potentialDrag); añadirOutline(potentialDrag);
         }
       }
+    } else if (dragObjetivoApilado) {
+      // Aterrizar justo encima de la columna objetivo (referencia distinta,
+      // compatible según las reglas del usuario, con hueco de peso/alto).
+      const objetivo = dragObjetivoApilado;
+      sd.truckX = dragCurrentTruckX;
+      sd.truckY = dragCurrentTruckY;
+      sd.enEspera = false;
+      restaurarColorPila(potentialDrag);
+      for (const p of paletsMutable) {
+        if (sd.paletIds.includes(p.id)) {
+          p.x = dragCurrentTruckX; p.y = dragCurrentTruckY;
+          p.z = objetivo.nuevoZ; p.nivel = objetivo.nuevoNivel;
+        }
+      }
+      onApilarManual?.(sd.paletIds, objetivo.paletId, objetivo.nuevoZ, objetivo.nuevoNivel);
+      emitirSeleccion(potentialDrag);
     } else if (!dragHasCollision) {
       // Mover dentro o desde espera hacia camión
       const wasStagged = sd.enEspera;
@@ -818,8 +888,36 @@ export function crearEscena3D(
 
       const excluir = new Set(sd.paletIds);
       dragHasCollision = hayColisionCamion(excluir, snX, snY, sd.anchoMm, sd.largoMm);
-      potentialDrag.position.set(snY * ESCALA, 0, snX * ESCALA);
-      setColorPila(potentialDrag, dragHasCollision ? 0xff3355 : parseInt((colorPorReferencia.get(sd.refId) ?? "#4fd1c5").slice(1), 16));
+      dragObjetivoApilado = null;
+
+      if (dragHasCollision && !sd.bloqueado) {
+        const objetivo = buscarObjetivoApilado(excluir, snX, snY, sd.anchoMm, sd.largoMm);
+        if (objetivo && objetivo.refId !== sd.refId && onComprobarApilableManual?.(sd.refId, objetivo.refId)) {
+          const alturaTrasApilar = objetivo.nuevoZ + sd.alturaTotal;
+          // La de arriba solo puede sobresalir en UN eje (largo o ancho),
+          // nunca en los dos a la vez.
+          const sobresaleLargo = sd.largoMm > objetivo.largoOcupadoMm;
+          const sobresaleAncho = sd.anchoMm > objetivo.anchoOcupadoMm;
+          const medidasOk = !(sobresaleLargo && sobresaleAncho);
+          const alturaOk = alturaTrasApilar <= camion.truckProfile.altoInteriorMm;
+          if (medidasOk && alturaOk) {
+            // Alinear EXACTO con la columna objetivo, no con el snap del
+            // arrastre — si no, el aterrizaje queda descuadrado respecto a
+            // lo que hay debajo.
+            dragCurrentTruckX = objetivo.aterrizarX;
+            dragCurrentTruckY = objetivo.aterrizarY;
+            dragObjetivoApilado = { paletId: objetivo.paletId, refId: objetivo.refId, nuevoZ: objetivo.nuevoZ, nuevoNivel: objetivo.nuevoNivel };
+          }
+        }
+      }
+
+      potentialDrag.position.set(dragCurrentTruckY * ESCALA, 0, dragCurrentTruckX * ESCALA);
+      const colorHex = dragObjetivoApilado
+        ? 0x3388ff // azul: se puede apilar aquí encima
+        : dragHasCollision
+        ? 0xff3355
+        : parseInt((colorPorReferencia.get(sd.refId) ?? "#4fd1c5").slice(1), 16);
+      setColorPila(potentialDrag, colorHex);
     }
   }
 
@@ -902,6 +1000,8 @@ export function crearEscena3D(
     opciones = opts;
     onSeleccion = opts.onSeleccion;
     onMoverCamion = opts.onMoverCamion;
+    onComprobarApilableManual = opts.onComprobarApilableManual;
+    onApilarManual = opts.onApilarManual;
     onEnviarEspera = opts.onEnviarEspera;
     onRecuperarDeEspera = opts.onRecuperarDeEspera;
     crateGeomPorRef = opts.crateGeomPorRef;

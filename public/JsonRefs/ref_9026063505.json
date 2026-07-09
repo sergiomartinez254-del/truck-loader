@@ -1,32 +1,32 @@
 {
   "meta": {
-    "sku": "9026005431",
-    "nombre": "9026005431",
-    "tipo": "carga",
+    "sku": "9026063505",
+    "nombre": "9026063505",
+    "tipo": "palet",
     "apilable": true,
-    "unidadesPorPack": 30,
+    "unidadesPorPack": 10,
     "exterior": {
-      "largoCm": 94.5,
-      "anchoCm": 94.5,
-      "altoCm": 2.6
+      "largoCm": 90,
+      "anchoCm": 90,
+      "altoCm": 11.8
     },
     "pesoUnidadKg": 0,
-    "paletBase": "9026066200",
+    "paletBase": null,
     "cargaEncima": null,
     "desmontado": false
   },
   "crate": {
     "v": 1,
-    "largo": 94.5,
-    "ancho": 94.5,
-    "alto": 0,
+    "largo": 90,
+    "ancho": 90,
+    "alto": 50,
     "dimMode": "interior",
     "apoyoType": "dobleBase",
     "dbOrient": "ancho",
-    "dobleBaseAncho": 0,
-    "dobleBaseAlto": 0,
-    "claroMax": 125,
-    "distOrillas": 19,
+    "dobleBaseAncho": 7,
+    "dobleBaseAlto": 10,
+    "claroMax": 67,
+    "distOrillas": 0,
     "tacoLargo": 10,
     "tacoAncho": 10,
     "tacoAlto": 10,
@@ -58,9 +58,9 @@
     "useTapabocaDerecha": false,
     "tapabocaGrosor": 1.8,
     "tapabocaMargen": 2,
-    "cubrirType": "contrachapado",
-    "cubrirGrosor": 2.6,
-    "tablaAnchoCubrir": 10,
+    "cubrirType": "jaula",
+    "cubrirGrosor": 1.8,
+    "tablaAnchoCubrir": 8,
     "separacionTablas": 15,
     "useLados": false,
     "ladoCubrirType": "contrachapado",
@@ -156,7 +156,17 @@
     "modelMatrixGap": 0,
     "useSabana": false,
     "sabanaExtra": 20,
-    "overrides": {},
+    "overrides": {
+      "db-1": {
+        "ancho": 4.5
+      },
+      "cubrir-3": {
+        "center": 72.5
+      },
+      "cubrir-1": {
+        "center": 17.78
+      }
+    },
     "barrotes": [],
     "cunas": [],
     "useTiradores": false,

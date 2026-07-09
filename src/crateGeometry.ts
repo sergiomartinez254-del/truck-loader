@@ -910,9 +910,13 @@ export function computePieces(cfg: Cfg): Piece[] {
       for (let j = 0; j < llapPos.length; j++) {
         const id = `llap-lado-${i}-${j}`; const ov = overrides[id] || {};
         if (isHorizontal) {
-          pieces.push({ id, layer: "llap-lado", parentIndex: i, index: j, x: llapLadoStartX, z: baseZ, y: ladoLlapBaseY + ladoOrillaLift + llapPos[j] - llapLadoAncho / 2, w: ov.largo ?? llapRunDim, h: ov.ancho ?? llapLadoAncho, d: ov.grosor ?? llapLadoGrosor });
+          const anchoPieza = ov.ancho ?? llapLadoAncho;
+          const center = ov.center ?? (ladoLlapBaseY + ladoOrillaLift + llapPos[j]);
+          pieces.push({ id, layer: "llap-lado", parentIndex: i, index: j, x: llapLadoStartX, z: baseZ, y: center - anchoPieza / 2, center, w: ov.largo ?? llapRunDim, h: anchoPieza, d: ov.grosor ?? llapLadoGrosor });
         } else {
-          pieces.push({ id, layer: "llap-lado", parentIndex: i, index: j, x: llapLadoStartX + llapPos[j] - llapLadoAncho / 2, z: baseZ, y: ladoLlapBaseY, w: ov.ancho ?? llapLadoAncho, h: ov.largo ?? llapRunDim, d: ov.grosor ?? llapLadoGrosor });
+          const anchoPieza = ov.ancho ?? llapLadoAncho;
+          const center = ov.center ?? (llapLadoStartX + llapPos[j]);
+          pieces.push({ id, layer: "llap-lado", parentIndex: i, index: j, x: center - anchoPieza / 2, z: baseZ, y: ladoLlapBaseY, center, w: anchoPieza, h: ov.largo ?? llapRunDim, d: ov.grosor ?? llapLadoGrosor });
         }
       }
     }
@@ -998,9 +1002,13 @@ export function computePieces(cfg: Cfg): Piece[] {
       for (let j = 0; j < llapPos.length; j++) {
         const id = `llap-testero-${i}-${j}`; const ov = overrides[id] || {};
         if (isHorizontal) {
-          pieces.push({ id, layer: "llap-testero", parentIndex: i, index: j, x: baseX, z: llapTesteroStartZ, y: testeroLlapBaseY + testeroOrillaLift + llapPos[j] - llapTesteroAncho / 2, w: ov.grosor ?? llapTesteroGrosor, h: ov.ancho ?? llapTesteroAncho, d: ov.largo ?? llapRunDim });
+          const anchoPieza = ov.ancho ?? llapTesteroAncho;
+          const center = ov.center ?? (testeroLlapBaseY + testeroOrillaLift + llapPos[j]);
+          pieces.push({ id, layer: "llap-testero", parentIndex: i, index: j, x: baseX, z: llapTesteroStartZ, y: center - anchoPieza / 2, center, w: ov.grosor ?? llapTesteroGrosor, h: anchoPieza, d: ov.largo ?? llapRunDim });
         } else {
-          pieces.push({ id, layer: "llap-testero", parentIndex: i, index: j, x: baseX, z: llapTesteroStartZ + llapPos[j] - llapTesteroAncho / 2, y: testeroLlapBaseY, w: ov.grosor ?? llapTesteroGrosor, h: ov.largo ?? llapRunDim, d: ov.ancho ?? llapTesteroAncho });
+          const anchoPieza = ov.ancho ?? llapTesteroAncho;
+          const center = ov.center ?? (llapTesteroStartZ + llapPos[j]);
+          pieces.push({ id, layer: "llap-testero", parentIndex: i, index: j, x: baseX, z: center - anchoPieza / 2, y: testeroLlapBaseY, center, w: ov.grosor ?? llapTesteroGrosor, h: ov.largo ?? llapRunDim, d: anchoPieza });
         }
       }
     }
@@ -1189,9 +1197,13 @@ export function computePieces(cfg: Cfg): Piece[] {
     for (let j = 0; j < llapPos.length; j++) {
       const id = `llap-tapa-${j}`; const ov = overrides[id] || {};
       if (isAlongLargo) {
-        pieces.push({ id, layer: "llap-tapa", index: j, x: tapaLlapStartX, z: tapaLlapStartZ + llapPos[j] - llapTapaAncho / 2, y: llapYBase, w: ov.largo ?? tapaLlapRunDim, h: ov.grosor ?? llapTapaGrosor, d: ov.ancho ?? llapTapaAncho });
+        const anchoPieza = ov.ancho ?? llapTapaAncho;
+        const center = ov.center ?? (tapaLlapStartZ + llapPos[j]);
+        pieces.push({ id, layer: "llap-tapa", index: j, x: tapaLlapStartX, z: center - anchoPieza / 2, y: llapYBase, center, w: ov.largo ?? tapaLlapRunDim, h: ov.grosor ?? llapTapaGrosor, d: anchoPieza });
       } else {
-        pieces.push({ id, layer: "llap-tapa", index: j, x: tapaLlapStartX + llapPos[j] - llapTapaAncho / 2, z: tapaLlapStartZ, y: llapYBase, w: ov.ancho ?? llapTapaAncho, h: ov.grosor ?? llapTapaGrosor, d: ov.largo ?? tapaLlapRunDim });
+        const anchoPieza = ov.ancho ?? llapTapaAncho;
+        const center = ov.center ?? (tapaLlapStartX + llapPos[j]);
+        pieces.push({ id, layer: "llap-tapa", index: j, x: center - anchoPieza / 2, z: tapaLlapStartZ, y: llapYBase, center, w: anchoPieza, h: ov.grosor ?? llapTapaGrosor, d: ov.largo ?? tapaLlapRunDim });
       }
     }
   }
