@@ -60,7 +60,7 @@ export interface EscenaOpciones {
   /** Aterriza `paletIds` justo encima del palet `objetivoPaletId`, al nuevo z/nivel indicados. */
   onApilarManual?: (paletIds: string[], objetivoPaletId: string, nuevoZ: number, nuevoNivel: number) => void;
   crateGeomPorRef?: Map<string, unknown>;
-  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean }>;
+  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null }>;
   rotacionVisual?: Map<string, boolean>;
   detalle?: boolean;
   onRecuperarDeEspera?: (paletIds: string[], nuevaX: number, nuevaY: number) => void;
@@ -363,9 +363,39 @@ export function crearEscena3D(
         // real detrás.
         const geomCarga = crateGeomPorRef?.get(palet.referenceId);
 
+        // Rejilla de columnas sobre la superficie del palet (ver
+        // calcularColumnasCarga en crateToReference.ts): piezas que caben
+        // varias veces en horizontal (p.ej. un barrote estrecho) se reparten
+        // en varias columnas más bajas en vez de apilarse todas en una sola
+        // torre. disposicion.colsLargo/colsAncho están calculados sobre los
+        // ejes NATIVOS (largo/ancho tal cual el JSON) — si el palet está
+        // girado para el camión (rotadoGeometriaReal), esos ejes quedan
+        // intercambiados aquí dentro, así que hay que intercambiarlos
+        // también al aplicarlos; y cada pieza individual necesita su propio
+        // giro si la rejilla se calculó en su orientación girada, combinado
+        // con el giro general del grupo (un giro cancela al otro, de ahí el
+        // "!==": si los dos giran, el neto es 0).
+        const disp = info.disposicion ?? { columnas: 1, colsLargo: 1, colsAncho: 1, girado: false };
+        const colsX = rotadoGeometriaReal ? disp.colsAncho : disp.colsLargo;
+        const colsZ = rotadoGeometriaReal ? disp.colsLargo : disp.colsAncho;
+        const rotarItem = disp.girado !== rotadoGeometriaReal;
+        const cellX = largoEsc / colsX;
+        const cellZ = anchoEsc / colsZ;
+        const unidadesDeColumna = (colIdx: number) => {
+          const base = Math.floor(palet.unidades / disp.columnas);
+          const resto = palet.unidades % disp.columnas;
+          return base + (colIdx < resto ? 1 : 0);
+        };
+        const posColumna = (colIdx: number) => {
+          const fila = Math.floor(colIdx / colsZ);
+          const col = colIdx % colsZ;
+          return { x: cellX * (fila + 0.5), z: cellZ * (col + 0.5) };
+        };
+
         if (geomPalet && geomCarga) {
-          // detalle: palet real + N copias de la geometría real de la carga,
-          // apiladas encima (cada una empieza donde acaba la anterior).
+          // detalle: palet real + rejilla de columnas con copias reales de
+          // la geometría de la carga (cada columna empieza donde acaba el
+          // palet, apilando solo sus propias unidades).
           const cm = construirMeshCrate(THREE, geomPalet, {
             colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
           });
@@ -376,37 +406,53 @@ export function crearEscena3D(
 
           const cargaAltoCm = bboxNativoCrate(geomCarga).alto;
           const cargaAltoEsc = cargaAltoCm * ESCALA * 10;
-          for (let k = 0; k < palet.unidades; k++) {
-            const cL = construirMeshCrate(THREE, geomCarga, {
-              colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
-            });
-            registrarRecursosDe(cL);
-            cL.position.set(largoEsc / 2, localY + paletAltoEsc + cargaAltoEsc * k, anchoEsc / 2);
-            cL.traverse((o: any) => { if (o.isMesh || o.isLineSegments) o.userData = { stackKey: sd.stackKey, isCargo: o.isMesh }; });
-            group.add(cL);
+          for (let col = 0; col < disp.columnas; col++) {
+            const { x: colX, z: colZ } = posColumna(col);
+            const undCol = unidadesDeColumna(col);
+            for (let k = 0; k < undCol; k++) {
+              const cL = construirMeshCrate(THREE, geomCarga, {
+                colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotarItem, escala: ESCALA,
+              });
+              registrarRecursosDe(cL);
+              cL.position.set(colX, localY + paletAltoEsc + cargaAltoEsc * k, colZ);
+              cL.traverse((o: any) => { if (o.isMesh || o.isLineSegments) o.userData = { stackKey: sd.stackKey, isCargo: o.isMesh }; });
+              group.add(cL);
+            }
           }
         } else if (geomPalet) {
           // Solo hay geometría real del palet (la carga no trae la suya, o
-          // no se encontró): palet real + láminas simples, como antes.
+          // no se encontró): palet real + rejilla de láminas simples.
           const cm = construirMeshCrate(THREE, geomPalet, {
             colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
-            cargaEncima: { unidades: palet.unidades, laminaLargoCm: info.laminaLargoCm, laminaAnchoCm: info.laminaAnchoCm, laminaAltoCm: info.laminaAltoMm / 10 },
           });
           registrarRecursosDe(cm);
           cm.position.set(largoEsc / 2, localY, anchoEsc / 2);
           cm.traverse((o: any) => { if (o.isMesh || o.isLineSegments) o.userData = { stackKey: sd.stackKey, isCargo: o.isMesh }; });
           group.add(cm);
+
+          const laminaLargoEsc = (rotarItem ? info.laminaAnchoCm : info.laminaLargoCm) / 10;
+          const laminaAnchoEsc = (rotarItem ? info.laminaLargoCm : info.laminaAnchoCm) / 10;
+          for (let col = 0; col < disp.columnas; col++) {
+            const { x: colX, z: colZ } = posColumna(col);
+            const undCol = unidadesDeColumna(col);
+            for (let k = 0; k < undCol; k++) {
+              const geoL = new THREE.BoxGeometry(laminaLargoEsc * 0.95, laminaAltoEsc * 0.9, laminaAnchoEsc * 0.95);
+              geomsLocal.push(geoL);
+              const meshL = new THREE.Mesh(geoL, matU);
+              meshL.position.set(colX, localY + paletAltoEsc + laminaAltoEsc * (k + 0.5), colZ);
+              meshL.userData = { stackKey: sd.stackKey, isCargo: true };
+              group.add(meshL);
+              const edgesL = new THREE.EdgesGeometry(geoL);
+              geomsLocal.push(edgesL);
+              const bordeL = new THREE.LineSegments(edgesL, matB);
+              bordeL.position.copy(meshL.position);
+              group.add(bordeL);
+            }
+          }
         } else {
-          // simplificado: cubo del palet base (huella completa) + N cubos de
-          // lámina encima a su tamaño PROPIO (no el de la huella del palet,
-          // que puede ser mayor) — mismo criterio que ya usa el modo detalle
-          // más arriba (cargaEncima), para que ambos modos coincidan.
-          // Si esta pila en concreto está colocada girada respecto a la
-          // orientación nativa (mismo criterio que la geometría real, ver
-          // rotadoGeometriaReal más arriba), la huella propia de la lámina
-          // también tiene que girar para no quedar desalineada del palet.
-          const laminaLargoEsc = (rotadoGeometriaReal ? info.laminaAnchoCm : info.laminaLargoCm) / 10;
-          const laminaAnchoEsc = (rotadoGeometriaReal ? info.laminaLargoCm : info.laminaAnchoCm) / 10;
+          // simplificado del todo (ni palet ni carga con geometría real):
+          // cubo del palet base (huella completa) + rejilla de cubos de
+          // lámina a su tamaño PROPIO.
           const geoP = new THREE.BoxGeometry(largoEsc * 0.95, paletAltoEsc * 0.98, anchoEsc * 0.95);
           geomsLocal.push(geoP);
           const meshP = new THREE.Mesh(geoP, matU);
@@ -418,18 +464,25 @@ export function crearEscena3D(
           const bordeP = new THREE.LineSegments(edgesP, matB);
           bordeP.position.copy(meshP.position);
           group.add(bordeP);
-          for (let i = 0; i < palet.unidades; i++) {
-            const geoL = new THREE.BoxGeometry(laminaLargoEsc * 0.95, laminaAltoEsc * 0.9, laminaAnchoEsc * 0.95);
-            geomsLocal.push(geoL);
-            const meshL = new THREE.Mesh(geoL, matU);
-            meshL.position.set(largoEsc / 2, localY + paletAltoEsc + laminaAltoEsc * (i + 0.5), anchoEsc / 2);
-            meshL.userData = { stackKey: sd.stackKey, isCargo: true };
-            group.add(meshL);
-            const edgesL = new THREE.EdgesGeometry(geoL);
-            geomsLocal.push(edgesL);
-            const bordeL = new THREE.LineSegments(edgesL, matB);
-            bordeL.position.copy(meshL.position);
-            group.add(bordeL);
+
+          const laminaLargoEsc = (rotarItem ? info.laminaAnchoCm : info.laminaLargoCm) / 10;
+          const laminaAnchoEsc = (rotarItem ? info.laminaLargoCm : info.laminaAnchoCm) / 10;
+          for (let col = 0; col < disp.columnas; col++) {
+            const { x: colX, z: colZ } = posColumna(col);
+            const undCol = unidadesDeColumna(col);
+            for (let k = 0; k < undCol; k++) {
+              const geoL = new THREE.BoxGeometry(laminaLargoEsc * 0.95, laminaAltoEsc * 0.9, laminaAnchoEsc * 0.95);
+              geomsLocal.push(geoL);
+              const meshL = new THREE.Mesh(geoL, matU);
+              meshL.position.set(colX, localY + paletAltoEsc + laminaAltoEsc * (k + 0.5), colZ);
+              meshL.userData = { stackKey: sd.stackKey, isCargo: true };
+              group.add(meshL);
+              const edgesL = new THREE.EdgesGeometry(geoL);
+              geomsLocal.push(edgesL);
+              const bordeL = new THREE.LineSegments(edgesL, matB);
+              bordeL.position.copy(meshL.position);
+              group.add(bordeL);
+            }
           }
         }
       } else {

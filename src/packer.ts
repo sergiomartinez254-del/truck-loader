@@ -702,7 +702,7 @@ export function empacarPedido(
       reference.palletType.anchoMm,
       reference.palletType.largoMm,
       truckProfile,
-      reference.rotable
+      truckProfile.cargaLateral ? true : reference.rotable
     );
 
     if (!orientacionPosible) {

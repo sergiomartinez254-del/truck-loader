@@ -13,7 +13,8 @@ import {
 } from "./index";
 import { crearEscena3D, type EscenaHandle, type EscenaOpciones, type PaletSeleccionado, type StagedStackInfo } from "./scene3d";
 import { cargarReferenciaDeTexto } from "./crateAdapter";
-import { crateReferenceAReference, debeIntercambiarParaCamion } from "./crateToReference";
+import { crateReferenceAReference, debeIntercambiarParaCamion, calcularColumnasCarga } from "./crateToReference";
+import { bboxNativoCrate } from "./crateMeshes";
 import type { CrateReference } from "./crateTypes";
 
 // ============================================================================
@@ -25,7 +26,7 @@ const CATALOGO_BASE: Reference[] = [];
 const CANTIDADES_INICIALES: Record<string, number> = {};
 // JSON del constructor por referencia cargada (para el visor 3D real futuro).
 const crateGeomPorRef = new Map<string, unknown>();
-const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean }>();
+const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null }>();
 const crateRefsCrudas = new Map<string, CrateReference>();
 
 let customRefs: Reference[] = [];
@@ -108,6 +109,11 @@ function puedeApilarManual(refArriba: string, refAbajo: string): boolean {
 // parcial con el resto (mismo criterio que ya usa cualquier otra
 // referencia al pedir más de lo que cabe en un palet).
 const unidadesCargaOverride = new Map<string, number>();
+// Nº de columnas en las que se reparten las unidades sobre la superficie
+// del palet (solo tipo "carga") — por defecto se calcula automáticamente
+// según las medidas (probando la pieza tal cual y girada 90°), pero se
+// puede fijar a mano por si el cálculo no convence en algún caso concreto.
+const columnasCargaOverride = new Map<string, number>();
 let nextStagedSlot = 0;
 
 // ============================================================================
@@ -126,7 +132,7 @@ document.getElementById("app")!.innerHTML = `
   <!-- Layout principal -->
   <div class="main-layout">
 
-    <!-- ── Sidebar ───────────────────────────────────── -->
+    <!-- ── Sidebar izquierda: solo el pedido ────────────── -->
     <aside class="sidebar">
 
       <!-- Pedido -->
@@ -135,6 +141,22 @@ document.getElementById("app")!.innerHTML = `
         <div id="order-rows"></div>
         <p class="auto-hint">Cada salto equivale a un palet completo. El plano se recalcula automáticamente.</p>
       </div>
+
+      <!-- Avisos lote mínimo -->
+      <div class="avisos" id="avisos-lote"></div>
+
+    </aside>
+
+    <!-- ── Área de resultados ─────────────────────────── -->
+    <div class="results-area" id="results-area">
+      <div class="empty-state" id="empty-state">
+        Configura el pedido y espera el recálculo automático para ver el plano de carga.
+      </div>
+    </div>
+
+    <!-- ── Sidebar derecha: todo lo demás ───────────────── -->
+    <aside class="sidebar sidebar--right">
+
       <!-- Cargar referencias desde JSON del constructor -->
       <div class="panel">
         <h2>Cargar referencias (JSON)</h2>
@@ -185,10 +207,6 @@ document.getElementById("app")!.innerHTML = `
         <div id="apilable-lista"></div>
       </div>
 
-      <!-- Avisos lote mínimo -->
-      <div class="avisos" id="avisos-lote"></div>
-
-
       <!-- Perfil camión -->
       <div class="panel">
         <h2>Perfil de camión</h2>
@@ -221,13 +239,6 @@ document.getElementById("app")!.innerHTML = `
       </div>
 
     </aside>
-
-    <!-- ── Área de resultados ─────────────────────────── -->
-    <div class="results-area" id="results-area">
-      <div class="empty-state" id="empty-state">
-        Configura el pedido y espera el recálculo automático para ver el plano de carga.
-      </div>
-    </div>
 
   </div>
 `;
@@ -272,6 +283,7 @@ interface EstadoPersistido {
   refsManuales: Reference[];
   apilableSobre: Record<string, string[]>;
   unidadesCargaOverride: Record<string, number>;
+  columnasCargaOverride: Record<string, number>;
   colores: Record<string, string>;
   stacksBloqueados: StackBloqueado[];
   stagedStacks: StagedStack[];
@@ -289,6 +301,7 @@ function guardarEstadoInmediato() {
     refsManuales,
     apilableSobre,
     unidadesCargaOverride: Object.fromEntries(unidadesCargaOverride),
+    columnasCargaOverride: Object.fromEntries(columnasCargaOverride),
     colores: Object.fromEntries(colorPorRef),
     stacksBloqueados: Array.from(stacksBloqueados.values()),
     stagedStacks,
@@ -332,6 +345,7 @@ function restaurarEstadoGuardado(): boolean {
   refsManuales = estado.refsManuales ?? [];
   apilableSobre = estado.apilableSobre ?? {};
   for (const [id, n] of Object.entries(estado.unidadesCargaOverride ?? {})) unidadesCargaOverride.set(id, n);
+  for (const [id, n] of Object.entries(estado.columnasCargaOverride ?? {})) columnasCargaOverride.set(id, n);
   for (const r of refsManuales) colorDe(r.id);
   for (const [id, color] of Object.entries(estado.colores ?? {})) {
     colorPorRef.set(id, color);
@@ -412,6 +426,11 @@ function renderOrderRows() {
               <span>ud/pack:</span>
               <input type="number" min="1" step="1" data-override-unidades="${ref.id}" value="${unidadesCargaOverride.get(ref.id) ?? ref.unidadesPorPalet}" style="width:52px; font-size:10px; padding:1px 4px;"/>
             </label>
+            <label style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-dim, #999); margin-top:2px;" title="Nº de columnas en las que se reparten las unidades sobre el palet — automático por medidas si se deja vacío">
+              <span>columnas:</span>
+              <input type="number" min="1" step="1" data-override-columnas="${ref.id}" value="${columnasCargaOverride.get(ref.id) ?? crateInfoPorRef.get(ref.id)?.disposicion?.columnas ?? 1}" style="width:52px; font-size:10px; padding:1px 4px;"/>
+              ${!columnasCargaOverride.has(ref.id) ? `<span style="opacity:0.6;">(auto)</span>` : `<button data-reset-columnas="${ref.id}" title="Volver a automático" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:10px;padding:0;">↺</button>`}
+            </label>
           ` : ""}
         </div>
         <input type="number" min="${minVal}" step="${ref.unidadesPorPalet}" data-ref="${ref.id}" value="${v}"/>
@@ -424,6 +443,26 @@ function renderOrderRows() {
       const id = inp.dataset.overrideUnidades!;
       const n = Math.max(1, Math.round(Number(inp.value)));
       unidadesCargaOverride.set(id, n);
+      recomponerRefs();
+      renderOrderRows();
+      planAuto();
+      guardarEstadoDebounced();
+    });
+  });
+  orderRowsEl.querySelectorAll<HTMLInputElement>("input[data-override-columnas]").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const id = inp.dataset.overrideColumnas!;
+      const n = Math.max(1, Math.round(Number(inp.value)));
+      columnasCargaOverride.set(id, n);
+      recomponerRefs();
+      renderOrderRows();
+      planAuto();
+      guardarEstadoDebounced();
+    });
+  });
+  orderRowsEl.querySelectorAll<HTMLButtonElement>("[data-reset-columnas]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      columnasCargaOverride.delete(btn.dataset.resetColumnas!);
       recomponerRefs();
       renderOrderRows();
       planAuto();
@@ -554,17 +593,34 @@ function recomponerRefs() {
   crateInfoPorRef.clear();
   for (const cr of crateRefsCrudas.values()) {
     try {
-      customRefs.push(crateReferenceAReference(cr, crateRefsCrudas, crateGeomPorRef, unidadesCargaOverride.get(cr.id)));
+      customRefs.push(crateReferenceAReference(cr, crateRefsCrudas, crateGeomPorRef, unidadesCargaOverride.get(cr.id), columnasCargaOverride.get(cr.id)));
       // Para tipo "carga" el intercambio lo marca el PALET BASE (lo que
       // agarra la carretilla), no la lámina — igual que en crateToReference.ts.
       const crateJsonParaIntercambio = cr.tipo === "carga" && cr.paletBase
         ? crateRefsCrudas.get(cr.paletBase)?.crateJson
         : cr.crateJson;
+      // Disposición en columnas sobre el palet (solo carga): cuántas
+      // unidades reales entran por columna se decide en scene3d con
+      // palet.unidades (el pack puede ser parcial), esto es solo la REJILLA
+      // — cuántas columnas y en qué sentido.
+      let disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null = null;
+      if (cr.tipo === "carga" && cr.paletBase) {
+        const baseGeom = crateGeomPorRef.get(cr.paletBase);
+        if (baseGeom) {
+          const bb = bboxNativoCrate(baseGeom);
+          const unidadesPorPack = unidadesCargaOverride.get(cr.id) ?? cr.unidadesPorPack;
+          disposicion = calcularColumnasCarga(
+            cr.largoMm, cr.anchoMm, Math.round(bb.largo * 10), Math.round(bb.ancho * 10),
+            unidadesPorPack, columnasCargaOverride.get(cr.id)
+          );
+        }
+      }
       crateInfoPorRef.set(cr.id, {
         tipo: cr.tipo, paletBase: cr.paletBase, unidades: cr.unidadesPorPack,
         laminaAltoMm: cr.altoUnidadMm, laminaLargoCm: cr.largoMm / 10, laminaAnchoCm: cr.anchoMm / 10,
         esDesmontado: !!cr.desmontado,
         intercambiado: debeIntercambiarParaCamion(crateJsonParaIntercambio),
+        disposicion,
       });
     } catch (e) {
       console.warn(e);
@@ -841,16 +897,6 @@ function renderResultados() {
       </div>`;
   }
 
-  // Summary bar compacta
-  const mediaSuelo = Math.round(camiones.reduce((s, c) => s + c.ocupacionSuelo, 0) / camiones.length);
-  const pesoTotal  = Math.round(camiones.reduce((s, c) => s + c.pesoTotalKg, 0));
-  const summaryHtml = `
-    <div class="summary-bar">
-      ${card(camiones.length.toString(), "Camiones")}
-      ${card(mediaSuelo + "%", "Suelo medio")}
-      ${card(pesoTotal + " kg", "Peso total")}
-    </div>`;
-
   // Viewer 3D con pestañas
   const tabsHtml = camiones.map((c, i) =>
     `<button class="viewer3d-tab${i === truckIdx ? " viewer3d-tab--active":""}" data-idx="${i}">CAMIÓN ${c.numero}</button>`
@@ -858,7 +904,6 @@ function renderResultados() {
 
   resultsAreaEl.innerHTML = `
     ${bannerHtml}
-    ${summaryHtml}
     <div class="viewer3d-panel">
       <div class="viewer3d-top">
         <div class="viewer3d-tabs" id="tabs">${tabsHtml}</div>
@@ -928,9 +973,6 @@ function renderResultados() {
   actualizarCamionActivo();
 }
 
-function card(valor: string, label: string): string {
-  return `<div class="summary-card"><div class="summary-card__valor">${valor}</div><div class="summary-card__label">${label}</div></div>`;
-}
 
 // ============================================================================
 // ACTUALIZAR CAMIÓN ACTIVO (3D + 2D)
@@ -1292,3 +1334,5 @@ function dibujarPlano(camion: TruckLoadPlan): string {
 planificar();
 (window as any).crateGeomPorRef = crateGeomPorRef;
 (window as any).crateInfoPorRef = crateInfoPorRef;
+(window as any).getResultado = () => resultado;
+(window as any).getTruckProfile = () => truckProfile;

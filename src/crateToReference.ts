@@ -11,10 +11,17 @@ import { bboxNativoCrate } from "./crateMeshes";
  * desde cualquier lado, así que se puede rotar libremente (comportamiento
  * de siempre). Se queda como "rotable" (true) si no hay información del
  * apoyo (referencia sin crateJson, o campo ausente).
+ *
+ * Excepción: si además de la base lleva tacos de arrastre Y tiradores de
+ * hierro, la caja se puede meter y sacar del camión empujándola y
+ * arrastrándola por el suelo — no hace falta que entren las palas por un
+ * lado concreto, así que es rotable aunque sea de dobles bases.
  */
 export function esRotable(crateJson: unknown): boolean {
   if (crateJson == null || typeof crateJson !== "object") return true;
-  return (crateJson as { apoyoType?: unknown }).apoyoType !== "dobleBase";
+  const cfg = crateJson as { apoyoType?: unknown; useTacosArrastre?: unknown; useTiradores?: unknown };
+  if (cfg.useTacosArrastre === true && cfg.useTiradores === true) return true;
+  return cfg.apoyoType !== "dobleBase";
 }
 
 /**
@@ -32,6 +39,76 @@ export function debeIntercambiarParaCamion(crateJson: unknown): boolean {
   return cfg.apoyoType === "dobleBase" && cfg.dbOrient === "ancho";
 }
 
+export interface DisposicionCarga {
+  /** Nº de columnas realmente usadas (puede ser menos que colsLargo×colsAncho si hay pocas unidades). */
+  columnas: number;
+  /** Tamaño de la rejilla: columnas a lo largo del palet (eje X) y a lo ancho (eje Z). */
+  colsLargo: number;
+  colsAncho: number;
+  /** Si la pieza va girada 90° respecto a como viene en el JSON, para encajar más columnas. */
+  girado: boolean;
+  /** Altura de la columna más alta, en unidades — determina el alto del pack. */
+  unidadesPorColumna: number;
+}
+
+/**
+ * Reparte N unidades de una pieza (itemLargoMm × itemAnchoMm) en columnas
+ * sobre la superficie del palet (palletLargoMm × palletAnchoMm), en vez de
+ * apilarlas todas en una sola torre — para piezas que por sus medidas caben
+ * varias veces en horizontal (p.ej. un barrote de 110×15 en un palet de
+ * 120×80: caben 5 en el ancho, así que 50 unidades salen en 5 columnas de
+ * 10, no en una torre de 50).
+ *
+ * Prueba las dos orientaciones (tal cual viene en el JSON y girada 90°) y
+ * se queda con la que reparte en más columnas — así la torre resultante es
+ * más baja. Si se indica columnasOverride, se usa esa cifra directamente
+ * (fijada a mano), sin comparar orientaciones.
+ */
+export function calcularColumnasCarga(
+  itemLargoMm: number, itemAnchoMm: number,
+  palletLargoMm: number, palletAnchoMm: number,
+  totalUnidades: number,
+  columnasOverride?: number
+): DisposicionCarga {
+  // Cada orientación es válida solo si la pieza cabe AL MENOS una vez en
+  // los dos ejes a la vez — si en algún eje no cabe ni una (p.ej. el largo
+  // de la pieza es mayor que el del palet), esa orientación no reparte en
+  // varias columnas: no forzar un mínimo de 1 por eje, o "no cabe" acabaría
+  // contando como "cabe una vez" por error.
+  const sinGirarCols = Math.floor(palletLargoMm / itemLargoMm);
+  const sinGirarFilas = Math.floor(palletAnchoMm / itemAnchoMm);
+  const sinGirarTotal = sinGirarCols * sinGirarFilas;
+  const giradaCols = Math.floor(palletLargoMm / itemAnchoMm);
+  const giradaFilas = Math.floor(palletAnchoMm / itemLargoMm);
+  const giradaTotal = giradaCols * giradaFilas;
+
+  let girado: boolean, colsLargo: number, colsAncho: number;
+  if (sinGirarTotal <= 0 && giradaTotal <= 0) {
+    // No cabe más de una vez en ningún sentido: una sola columna con todo,
+    // como se hacía siempre (puede sobresalir del palet, como ya se permitía).
+    // El override no tiene ningún eje sobre el que repartir en este caso.
+    girado = false; colsLargo = 1; colsAncho = 1;
+  } else {
+    girado = giradaTotal > sinGirarTotal;
+    colsLargo = girado ? giradaCols : sinGirarCols;
+    colsAncho = girado ? giradaFilas : sinGirarFilas;
+  }
+
+  if (columnasOverride && columnasOverride > 0 && (colsLargo > 1 || colsAncho > 1)) {
+    // Fijado a mano: se respeta la orientación y el eje que el cálculo
+    // automático ya identificó como el que admite varias columnas (el
+    // barrote seguirá repartiéndose A LO ANCHO, solo que ahora en 4
+    // columnas en vez de 5) — lo único que cambia es CUÁNTAS entran en
+    // ese eje, no en cuál de los dos ejes se reparten.
+    const columnasDeseadas = Math.max(1, Math.round(columnasOverride));
+    if (colsAncho >= colsLargo) { colsAncho = columnasDeseadas; colsLargo = 1; }
+    else { colsLargo = columnasDeseadas; colsAncho = 1; }
+  }
+
+  const columnas = Math.max(1, Math.min(colsLargo * colsAncho, totalUnidades));
+  return { columnas, colsLargo, colsAncho, girado, unidadesPorColumna: Math.ceil(totalUnidades / columnas) };
+}
+
 export function crateReferenceAReference(
   cr: CrateReference,
   refs: Map<string, CrateReference>,
@@ -39,7 +116,10 @@ export function crateReferenceAReference(
   /** Sustituye cr.unidadesPorPack para esta referencia (solo tiene efecto
    * en tipo "carga") — deja personalizar cuántas unidades trae cada pack,
    * en vez del número fijo que venía en el JSON exportado. */
-  unidadesPorPackOverride?: number
+  unidadesPorPackOverride?: number,
+  /** Fuerza el nº de columnas en las que se reparten las unidades sobre el
+   * palet (solo tipo "carga") en vez del cálculo automático por medidas. */
+  columnasOverride?: number
 ): Reference {
   // Caso CARGA: palet base (geometría real) + torre de N láminas encima
   if (cr.tipo === "carga" && cr.paletBase) {
@@ -53,11 +133,14 @@ export function crateReferenceAReference(
     const basePaletLargoMm = Math.round(bb.largo * 10);
     const basePaletAnchoMm = Math.round(bb.ancho * 10);
     const unidadesPorPack = unidadesPorPackOverride ?? cr.unidadesPorPack;
+    const disposicion = calcularColumnasCarga(cr.largoMm, cr.anchoMm, basePaletLargoMm, basePaletAnchoMm, unidadesPorPack, columnasOverride);
 
-    // Exterior = max por eje (palet vs lámina); alto = palet + N×lámina
+    // Exterior = max por eje (palet vs lámina); alto = palet + altura de la
+    // columna más alta (no de la torre completa: con varias columnas, cada
+    // una lleva solo una parte de las unidades).
     let largoMm = Math.max(basePaletLargoMm, cr.largoMm);
     let anchoMm = Math.max(basePaletAnchoMm, cr.anchoMm);
-    const packAltoMm = Math.round(basePaletAltoMm + cr.altoUnidadMm * unidadesPorPack);
+    const packAltoMm = Math.round(basePaletAltoMm + cr.altoUnidadMm * disposicion.unidadesPorColumna);
 
     // La rotación y la orientación de carga las restringe el PALET BASE (es
     // lo que la carretilla agarra), no la lámina/carga que va encima.

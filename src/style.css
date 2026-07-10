@@ -73,6 +73,11 @@ html, body {
   padding: 12px; display: flex; flex-direction: column; gap: 10px;
 }
 
+.sidebar--right {
+  border-right: none;
+  border-left: 1px solid var(--line);
+}
+
 /* ── Results area ──────────────────────────────────────────────── */
 
 .results-area {
