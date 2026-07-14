@@ -101,6 +101,34 @@ function calcularGananciaCapiculado(crateJson: unknown, desmontado: boolean): { 
   return { gananciaMm: Math.round(cubrirGrosorCm * 10), desplazamientoMm };
 }
 
+/**
+ * Ganancia (mm) de la unión ALTERNA en un apilado capiculado de 3+ palets —
+ * la que conecta el nivel invertido con el siguiente nivel normal (2ª-3ª,
+ * 4ª-5ª...). Es un mecanismo distinto al de `calcularGananciaCapiculado`
+ * (cubrir contra cubrir): aquí el palet de arriba, en orientación normal,
+ * apoya sus tacos en el rastrel del palet invertido de abajo. Ganancia =
+ * grueso del taco + grueso del rastrel. No lleva desplazamiento propio: al
+ * ir en orientación normal, queda alineado con el nivel de dos más abajo
+ * (el desplazamiento de la unión cubrir-cubrir ya deja hueco de sobra).
+ *
+ * Mismas condiciones de entrada que la unión de cubrir (apoyoType "tacos",
+ * useCapiculado activo, no desmontada), más useRastreles activo — sin
+ * rastrel no hay capa donde apoyar esta unión.
+ */
+function calcularGananciaCapiculadoAlt(crateJson: unknown, desmontado: boolean): number | undefined {
+  if (desmontado || crateJson == null || typeof crateJson !== "object") return undefined;
+  const cfg = crateJson as {
+    apoyoType?: unknown; useCapiculado?: unknown;
+    useRastreles?: unknown; rastrelAlto?: unknown; tacoAlto?: unknown;
+  };
+  if (cfg.apoyoType !== "tacos" || cfg.useCapiculado !== true || cfg.useRastreles !== true) return undefined;
+  const rastrelAltoCm = typeof cfg.rastrelAlto === "number" ? cfg.rastrelAlto : Number(cfg.rastrelAlto);
+  const tacoAltoCm = typeof cfg.tacoAlto === "number" ? cfg.tacoAlto : Number(cfg.tacoAlto);
+  if (!Number.isFinite(rastrelAltoCm) || rastrelAltoCm <= 0) return undefined;
+  if (!Number.isFinite(tacoAltoCm) || tacoAltoCm <= 0) return undefined;
+  return Math.round((tacoAltoCm + rastrelAltoCm) * 10);
+}
+
 export interface DisposicionCarga {
   /** Nº de columnas realmente usadas (puede ser menos que colsLargo×colsAncho si hay pocas unidades). */
   columnas: number;
@@ -271,6 +299,7 @@ export function crateReferenceAReference(
   const packAltoMm = Math.round(altoUnidadMm * cr.unidadesPorPack);
   if (debeIntercambiarParaCamion(cr.crateJson)) [largoMm, anchoMm] = [anchoMm, largoMm];
   const capiculado = calcularGananciaCapiculado(cr.crateJson, !!cr.desmontado);
+  const capiculadoAlt = calcularGananciaCapiculadoAlt(cr.crateJson, !!cr.desmontado);
   return {
     id: cr.id, sku: cr.sku, nombre: cr.nombre,
     unidadesPorPalet: cr.unidadesPorPack, loteMinimo: 1,
@@ -285,5 +314,6 @@ export function crateReferenceAReference(
     rotable: esRotable(cr.crateJson),
     alturaGanadaCapiculadoMm: capiculado?.gananciaMm,
     desplazamientoCapiculadoMm: capiculado?.desplazamientoMm,
+    alturaGanadaCapiculadoAltMm: capiculadoAlt,
   };
 }

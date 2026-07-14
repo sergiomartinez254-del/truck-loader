@@ -74,13 +74,33 @@ export interface Reference {
    */
   alturaGanadaCapiculadoMm?: number;
   /**
+   * Ganancia (mm) de la unión "alterna", la que se da en las uniones PARES
+   * empezando a contar desde la segunda (2ª-3ª, 4ª-5ª...) cuando se apilan
+   * 3 o más palets en capiculado. La 1ª-2ª (y 3ª-4ª, 5ª-6ª...) usa
+   * `alturaGanadaCapiculadoMm` (cubrir contra cubrir, ambos a la misma
+   * altura). La alterna es un mecanismo distinto: el palet de arriba (en
+   * su orientación normal, sin volteo) apoya sus tacos sobre la capa de
+   * apoyo del palet invertido de abajo (p.ej. su rastrel), colándose entre
+   * los tacos de ese palet invertido gracias al desplazamiento en X que ya
+   * trae de su propia unión con capiculado normal — por eso esta unión NO
+   * lleva desplazamiento propio (queda alineada con el nivel de dos más
+   * abajo). La ganancia es el grosor de las capas que el taco de arriba
+   * atraviesa hasta topar con la capa de apoyo elegida (p.ej. solo el
+   * grosor del taco si apoya en el rastrel, que va justo debajo). Depende
+   * de qué capas tenga cada construcción entre el taco y la capa de apoyo;
+   * 0/undefined si no aplica (p.ej. sin rastreles).
+   */
+  alturaGanadaCapiculadoAltMm?: number;
+  /**
    * Cuánto se desplaza en horizontal (mm) el nivel invertido de una unión
    * capiculada, para que sus tacos caigan en el hueco entre los tacos de
    * abajo en vez de encima — sin este desplazamiento, dos piezas de madera
    * sólidas (los tacos) ocupan literalmente el mismo sitio, y por más que
    * se reduzca la altura, se ven solapadas. Se aproxima con el ancho del
    * propio taco (no hace falta la posición exacta de cada uno para que la
-   * vista 3D se vea razonable).
+   * vista 3D se vea razonable). Solo se aplica en las uniones de cubrir
+   * (impares contando desde la 1ª-2ª); la unión alterna no desplaza nada,
+   * queda alineada con el nivel de dos más abajo.
    */
   desplazamientoCapiculadoMm?: number;
 }

@@ -678,7 +678,12 @@ export function crearEscena3D(
         truckY: base.y,
         anchoMm: base.anchoOcupadoMm,
         largoMm: base.largoOcupadoMm,
-        alturaTotal: paletsPila.reduce((s, p) => s + p.alturaMm, 0),
+        // Suelo a techo REAL (max z+altura menos min z), no la suma de
+        // alturaMm de cada nivel: con capiculado, cada union hunde el
+        // siguiente nivel dentro del anterior (ver packer.ts), asi que la
+        // suma ciega de alturas contaba de mas el hueco ganado en cada
+        // union -- z ya refleja ese hundimiento, asi que basta con leerlo.
+        alturaTotal: Math.max(...paletsPila.map(p => p.z + p.alturaMm)) - Math.min(...paletsPila.map(p => p.z)),
         unidades: paletsPila.reduce((s, p) => s + p.unidades, 0),
         niveles: paletsPila.length,
         enEspera: false,
@@ -701,7 +706,7 @@ export function crearEscena3D(
         truckX: -1, truckY: -1,
         anchoMm: base.anchoOcupadoMm,
         largoMm: base.largoOcupadoMm,
-        alturaTotal: si.palets.reduce((s, p) => s + p.alturaMm, 0),
+        alturaTotal: Math.max(...si.palets.map(p => p.z + p.alturaMm)) - Math.min(...si.palets.map(p => p.z)),
         unidades: si.palets.reduce((s, p) => s + p.unidades, 0),
         niveles: si.palets.length,
         enEspera: true,
