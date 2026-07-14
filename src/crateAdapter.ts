@@ -62,6 +62,36 @@ function calcularDesmontado(crateJson: unknown): CrateReference["desmontado"] {
 }
 
 /**
+ * Calcula las medidas exteriores REALES a partir de la geometría (mismo
+ * criterio que calcularDesmontado, arriba): así lo que exportó el
+ * constructor en meta.exterior nunca puede quedarse corto respecto a lo
+ * que el planificador de verdad dibuja — por ejemplo, si hay barrotes
+ * sueltos añadidos a mano que sobresalen de las llapasas, meta.exterior
+ * podía no contarlos aunque la geometría real sí los tenga. Se queda con
+ * el máximo entre lo exportado y lo calculado, por si lo exportado
+ * incluyera intencionadamente algún margen que la geometría no refleje.
+ * Si la geometría no se puede calcular, se cae en lo exportado tal cual
+ * (nunca bloquea la carga de la referencia).
+ */
+function calcularExteriorReal(
+  crateJson: unknown,
+  exportadoCm: { largoCm: number; anchoCm: number; altoCm: number }
+): { largoCm: number; anchoCm: number; altoCm: number } {
+  if (crateJson == null || typeof crateJson !== "object") return exportadoCm;
+  try {
+    const { largo, ancho, alto } = bboxNativoCrate(crateJson as Cfg);
+    if (!numPos(largo) || !numPos(ancho) || !numPos(alto)) return exportadoCm;
+    return {
+      largoCm: Math.max(largo, exportadoCm.largoCm),
+      anchoCm: Math.max(ancho, exportadoCm.anchoCm),
+      altoCm: Math.max(alto, exportadoCm.altoCm),
+    };
+  } catch {
+    return exportadoCm;
+  }
+}
+
+/**
  * Convierte un envoltorio ya parseado a CrateReference. Lanza Error con mensaje
  * claro si el `meta` es inválido. Usa `cargarReferenciaDeTexto` si partes del
  * string del archivo.
@@ -78,7 +108,7 @@ export function crateWrapperAReferencia(wrapper: CrateWrapper): CrateReference {
     throw new Error('El "meta" no tiene un SKU válido.');
   }
   const tipo = meta.tipo;
- if (tipo !== "palet" && tipo !== "caja" && tipo !== "jaula" && tipo !== "carga") {
+ if (tipo !== "palet" && tipo !== "caja" && tipo !== "jaula" && tipo !== "carga" && tipo !== "foam") {
     throw new Error(`Tipo de bulto no reconocido en ${meta.sku}: "${String(tipo)}".`);
   }
   if (tipo === "carga" && (typeof meta.paletBase !== "string" || !meta.paletBase.trim())) {
@@ -99,6 +129,7 @@ export function crateWrapperAReferencia(wrapper: CrateWrapper): CrateReference {
 
   const cargaEncima = normalizarCargaEncima(meta.cargaEncima);
   const desmontado = meta.desmontado === true ? calcularDesmontado(wrapper.crate) : null;
+  const exteriorReal = calcularExteriorReal(wrapper.crate, meta.exterior);
 
   const pesoMaxApilableKg =
     meta.pesoMaxApilableKg == null
@@ -115,9 +146,9 @@ export function crateWrapperAReferencia(wrapper: CrateWrapper): CrateReference {
     paletBase: tipo === "carga" ? meta.paletBase!.trim() : null,
     apilable: meta.apilable,
     unidadesPorPack: meta.unidadesPorPack,
-    largoMm: cmAmm(meta.exterior.largoCm),
-    anchoMm: cmAmm(meta.exterior.anchoCm),
-    altoUnidadMm: cmAmm(meta.exterior.altoCm),
+    largoMm: cmAmm(exteriorReal.largoCm),
+    anchoMm: cmAmm(exteriorReal.anchoCm),
+    altoUnidadMm: cmAmm(exteriorReal.altoCm),
     pesoUnidadKg: meta.pesoUnidadKg,
     pesoMaxApilableKg,
     cargaEncima,

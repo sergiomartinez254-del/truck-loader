@@ -71,7 +71,7 @@ export function generarPaletsDeLinea(
 function crearPalet(reference: Reference, unidades: number, esCompleto: boolean): PalletInstance {
   const ratioLlenado = unidades / reference.unidadesPorPalet;
   const alturaMercancia = reference.alturaPaletCompletoMm - reference.palletType.alturaBaseMm;
-  const alturaMm = esCompleto
+  const alturaMm = (esCompleto || reference.alturaFija)
     ? reference.alturaPaletCompletoMm
     : Math.round(reference.palletType.alturaBaseMm + alturaMercancia * ratioLlenado);
 

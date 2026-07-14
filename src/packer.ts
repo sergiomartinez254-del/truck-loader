@@ -14,6 +14,9 @@ interface PilaUnidad {
   largoMm: number;
   alturaTotalMm: number;
   pesoTotalKg: number;
+  /** Cuánto se resta a la altura de cada palet a partir del segundo, al
+   * posicionarlos en Z uno encima del otro (0 = apilado normal). */
+  gananciaCapiculadoMm: number;
 }
 
 interface Orientacion {
@@ -83,13 +86,32 @@ function agruparEnPilas(
 ): PilaUnidad[] {
   const pilas: PilaUnidad[] = [];
 
+  // Ganancia real por unión SOLO si el camión tiene el interruptor activo Y
+  // la referencia lo permite (calculado de su propia geometría — tacos).
+  const ganancia = (truckProfile.capiculado && reference.alturaGanadaCapiculadoMm)
+    ? reference.alturaGanadaCapiculadoMm
+    : 0;
+  // Altura que añade CADA unión entre dos palets consecutivos de la pila:
+  // la primera pieza suma su alto completo, cada una a partir de la
+  // segunda "ahorra" la ganancia (sus tacos se entrelazan con los de la
+  // anterior en vez de apoyar plano encima).
+  const alturaDeUnion = (p: PalletInstance) => Math.max(p.alturaMm - ganancia, 1);
+  // El nivel invertido de cada unión se desplaza hacia un lado (ver
+  // scene3d.ts) para que las tablas del cubrir entrelacen en cremallera —
+  // ese desplazamiento sale del hueco "normal" de la pila, así que hay que
+  // ampliar la huella reservada en planta (en el sentido del largo) para
+  // que el packer no coloque otra pila justo al lado y acaben chocando
+  // visualmente. Solo aplica si de verdad hay alguna unión (2+ palets).
+  const desplazamiento = ganancia > 0 ? (reference.desplazamientoCapiculadoMm ?? 0) : 0;
+
   const empaquetarComoUnidad = (lista: PalletInstance[]): PilaUnidad => ({
     referenceId: reference.id,
     pallets: lista,
     anchoMm: orientacion.anchoOcupado,
-    largoMm: orientacion.largoOcupado,
-    alturaTotalMm: lista.reduce((s, p) => s + p.alturaMm, 0),
+    largoMm: orientacion.largoOcupado + (lista.length >= 2 ? desplazamiento : 0),
+    alturaTotalMm: lista.length === 0 ? 0 : lista[0].alturaMm + lista.slice(1).reduce((s, p) => s + alturaDeUnion(p), 0),
     pesoTotalKg: lista.reduce((s, p) => s + p.pesoKg, 0),
+    gananciaCapiculadoMm: ganancia,
   });
 
   if (!reference.apilable) {
@@ -101,9 +123,9 @@ function agruparEnPilas(
   let pesoActual = 0;
 
   for (const palet of palets) {
-    const alturaSiSeAñade = alturaActual + palet.alturaMm;
-    const pesoSiSeAñade = pesoActual + palet.pesoKg;
     const esPrimero = pilaActual.length === 0;
+    const alturaSiSeAñade = esPrimero ? palet.alturaMm : alturaActual + alturaDeUnion(palet);
+    const pesoSiSeAñade = pesoActual + palet.pesoKg;
 
     const cabe = esPrimero
       ? alturaSiSeAñade <= truckProfile.altoInteriorMm
@@ -389,7 +411,7 @@ function empacarUnCamion(
         largoOcupadoMm: largoOcupado,
         anchoOcupadoMm: anchoOcupado,
       });
-      z += palet.alturaMm;
+      z += Math.max(palet.alturaMm - pila.gananciaCapiculadoMm, 1);
     });
   }
 
@@ -414,7 +436,7 @@ function empacarUnCamion(
               largoOcupadoMm: colocacion.largoOcupado,
               anchoOcupadoMm: colocacion.anchoOcupado,
             });
-            z += palet.alturaMm;
+            z += Math.max(palet.alturaMm - colocacion.pila.gananciaCapiculadoMm, 1);
           });
         }
         pesoAcumulado += pesoPendientesTotal;
@@ -430,7 +452,7 @@ function empacarUnCamion(
 }
 
 /** Calcula las métricas (suelo, volumen, peso) de un camión a partir de sus palets ya colocados. */
-function recalcularMetricasCamion(
+export function recalcularMetricasCamion(
   truckProfile: TruckProfile,
   numero: number,
   colocados: PlacedPallet[],
@@ -443,11 +465,34 @@ function recalcularMetricasCamion(
     (truckProfile.anchoInteriorMm / 1000) *
     (truckProfile.altoInteriorMm / 1000);
 
-  const volumenUtilizadoM3 = colocados.reduce(
-    (acc, p) =>
-      acc + (p.largoOcupadoMm / 1000) * (p.anchoOcupadoMm / 1000) * (p.alturaMm / 1000),
-    0
-  );
+  // Volumen ocupado por PILA (agrupada por posición x,y), no por palet
+  // suelto. Sumar huella × alturaMm de cada palet por separado sobrecuenta
+  // una columna capiculada: su huella (que ya incluye el desplazamiento de
+  // las uniones capiculadas) se contaría una vez POR NIVEL en vez de una
+  // sola vez para toda la pila, y cada nivel aportaría su altura completa
+  // aunque el packer haya "hundido" cada unión capiculada dentro de la de
+  // abajo. El volumen real que reserva la columna en el camión es su
+  // huella (una sola vez) por su altura real de suelo a techo — eso es
+  // justo lo que ya reflejan z y alturaMm de sus palets tras el capiculado.
+  // La huella se toma como el máximo largo/ancho ocupado entre los niveles
+  // de la pila (no solo el del nivel 0): con apilado manual entre
+  // referencias distintas, un nivel superior puede tener una huella algo
+  // distinta a la de la base.
+  const pilasPorPosicion = new Map<string, PlacedPallet[]>();
+  for (const p of colocados) {
+    const key = `${p.x}-${p.y}`;
+    const lista = pilasPorPosicion.get(key);
+    if (lista) lista.push(p);
+    else pilasPorPosicion.set(key, [p]);
+  }
+  let volumenUtilizadoM3 = 0;
+  for (const pila of pilasPorPosicion.values()) {
+    const largoM = Math.max(...pila.map((p) => p.largoOcupadoMm)) / 1000;
+    const anchoM = Math.max(...pila.map((p) => p.anchoOcupadoMm)) / 1000;
+    const zMin = Math.min(...pila.map((p) => p.z));
+    const zMax = Math.max(...pila.map((p) => p.z + p.alturaMm));
+    volumenUtilizadoM3 += largoM * anchoM * ((zMax - zMin) / 1000);
+  }
 
   const sueloTotalM2 = (truckProfile.largoInteriorMm / 1000) * (truckProfile.anchoInteriorMm / 1000);
   const sueloUsadoM2 = colocados
@@ -543,13 +588,21 @@ function intentarRescatePorDesalojo(
     for (const paletsDeLaPila of candidatos) {
       const base = paletsDeLaPila[0];
 
+      // La ganancia real ya está reflejada en las z de los palets (vienen de
+      // una colocación previa que ya la aplicó) — se deriva en vez de
+      // recalcularla, porque aquí no hay una Reference a mano.
+      const gananciaObservada = paletsDeLaPila.length >= 2
+        ? Math.max(0, paletsDeLaPila[0].alturaMm - (paletsDeLaPila[1].z - paletsDeLaPila[0].z))
+        : 0;
+      const ultimoPalet = paletsDeLaPila[paletsDeLaPila.length - 1];
       const pilaDesalojada: PilaUnidad = {
         referenceId: base.referenceId,
         pallets: paletsDeLaPila,
         anchoMm: base.anchoOcupadoMm,
         largoMm: base.largoOcupadoMm,
-        alturaTotalMm: paletsDeLaPila.reduce((s, p) => s + p.alturaMm, 0),
+        alturaTotalMm: (ultimoPalet.z + ultimoPalet.alturaMm) - paletsDeLaPila[0].z,
         pesoTotalKg: paletsDeLaPila.reduce((s, p) => s + p.pesoKg, 0),
+        gananciaCapiculadoMm: gananciaObservada,
       };
 
       const restoDelCamion = camion.pallets.filter((p) => p.x !== base.x || p.y !== base.y);
@@ -576,7 +629,11 @@ function intentarRescatePorDesalojo(
             largoOcupadoMm: colocacion.largoOcupado,
             anchoOcupadoMm: colocacion.anchoOcupado,
           });
-          z += palet.alturaMm;
+          // Igual que en empacarUnCamion (colocación normal y su propio
+          // rescate por backtracking): hay que restar la ganancia
+          // capiculada de la pila, o la pila evacuada pierde su apilado
+          // capiculado (altura completa sin comprimir) justo al moverla.
+          z += Math.max(palet.alturaMm - colocacion.pila.gananciaCapiculadoMm, 1);
         });
       }
 

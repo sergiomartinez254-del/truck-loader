@@ -15,7 +15,7 @@
 // ----------------------------------------------------------------------------
 
 /** Qué es físicamente la referencia. Para el packer todas son un ortoedro. */
-export type CrateBultoTipo = "palet" | "caja" | "jaula" | "carga";
+export type CrateBultoTipo = "palet" | "caja" | "jaula" | "carga" | "foam";
 
 /** Carga que va ENCIMA de un palet (aros de cartón, piezas raras…). Opcional. */
 export interface CrateCargaEncima {

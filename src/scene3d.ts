@@ -4,7 +4,7 @@ import type { PlacedPallet, TruckLoadPlan } from "./types";
 import { construirMeshCrate, bboxNativoCrate, type Recursos3D } from "./crateMeshes";
 
 const ESCALA = 1 / 100;           // 1 Three.js unit = 100 mm
-const SNAP_MM = 50;                // rejilla de snap durante drag
+const SNAP_MM = 10;                // rejilla de snap durante drag
 const DRAG_THRESHOLD_PX = 4;      // píxeles para distinguir click de drag
 /** Brecha entre el camión y la zona de espera (mm). */
 const ESPERA_GAP_MM = 400;
@@ -60,7 +60,7 @@ export interface EscenaOpciones {
   /** Aterriza `paletIds` justo encima del palet `objetivoPaletId`, al nuevo z/nivel indicados. */
   onApilarManual?: (paletIds: string[], objetivoPaletId: string, nuevoZ: number, nuevoNivel: number) => void;
   crateGeomPorRef?: Map<string, unknown>;
-  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null }>;
+  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null; desplazamientoCapiculadoMm: number }>;
   rotacionVisual?: Map<string, boolean>;
   detalle?: boolean;
   onRecuperarDeEspera?: (paletIds: string[], nuevaX: number, nuevaY: number) => void;
@@ -289,8 +289,24 @@ export function crearEscena3D(
     group.position.set(threeX, 0, threeZ);
     group.userData = sd;
 
-    let localY = 0;
-    for (const palet of [...paletsPila].sort((a, b) => a.nivel - b.nivel)) {
+    const nivelesOrdenados = [...paletsPila].sort((a, b) => a.nivel - b.nivel);
+    for (let idxNivel = 0; idxNivel < nivelesOrdenados.length; idxNivel++) {
+      const palet = nivelesOrdenados[idxNivel];
+      // La Y de cada nivel viene DIRECTAMENTE de palet.z (lo que calculó el
+      // packer, ya con el capiculado aplicado si toca) — antes se
+      // recalculaba aquí sumando alturaMm de cada palet en un acumulador
+      // aparte, completamente ciego a la reducción del packer: por eso el
+      // capiculado no se notaba en el dibujo aunque sí se calculara bien.
+      const localY = palet.z * ESCALA;
+      // Si el hueco con el nivel de abajo es menor que su alto completo,
+      // el packer ha aplicado capiculado en esta unión — hay que desplazar
+      // este nivel en X (aparte de ir ya más pegado en Y) para que las
+      // tablas de su cubrir caigan en los huecos del cubrir de abajo
+      // (cremallera), no encima de las mismas tablas.
+      const nivelAnterior = idxNivel > 0 ? nivelesOrdenados[idxNivel - 1] : null;
+      const esUnionCapiculada = nivelAnterior != null
+        && palet.z < nivelAnterior.z + nivelAnterior.alturaMm
+        && idxNivel % 2 === 1; // solo los niveles "del revés" (1, 3, 5…) — los pares vuelven a la orientación normal, alineados con el nivel 0
       // Cada nivel usa SU PROPIA referencia (color, geometría, medidas) — no
       // la de sd/paletsPila[0]. Antes daba igual (una pila siempre era una
       // sola referencia, apilada por el packer automático), pero con el
@@ -298,9 +314,40 @@ export function crearEscena3D(
       // referencia diferente, y si no se coge aquí bien, la de arriba
       // "absorbe" el aspecto de la de abajo (o al revés).
       const colorHex = colorPorReferencia.get(palet.referenceId) ?? "#4fd1c5";
-      const largoEsc = palet.largoOcupadoMm * ESCALA;
+      const info = crateInfoPorRef?.get(palet.referenceId);
+      const pt = palet.palletType;
+      // rotHuella se deriva de anchoOcupadoMm, NUNCA de largoOcupadoMm: el
+      // desplazamiento capiculado (ver agruparEnPilas en packer.ts) se suma
+      // SOLO a largoOcupadoMm de la pila entera -- y ese mismo valor
+      // ensanchado se copia, tal cual, a CADA nivel de la pila (no solo al
+      // hueco reservado). Compararlo contra pt.largoMm/anchoMm para
+      // detectar el giro (y, peor, USARLO como huella real de la pieza)
+      // corrompe tanto la deteccion de giro como el tamano/posicion
+      // dibujados en una pila capiculada de 2+ niveles: cada pieza salia
+      // mas ancha de lo real Y centrada mas a la derecha de lo real, un
+      // desplazamiento visible de la malla respecto al contorno blanco
+      // (que si usa correctamente el valor ensanchado, porque el suyo es
+      // el hueco reservado de la pila, no la pieza individual).
+      // anchoOcupadoMm nunca se ensancha (el desplazamiento capiculado solo
+      // afecta al largo), asi que es la unica huella fiable por nivel.
+      const rotHuella = Math.abs(palet.anchoOcupadoMm - pt.anchoMm) > Math.abs(palet.anchoOcupadoMm - pt.largoMm);
+      // Huella REAL de esta pieza (mm nativos del tipo de palet, orientados
+      // segun rotHuella) -- no palet.largoOcupadoMm, que para una pila
+      // capiculada de 2+ niveles es el hueco RESERVADO de toda la pila
+      // (mas ancho que una pieza suelta), no el tamano de esta pieza.
+      const largoEsc = (rotHuella ? pt.anchoMm : pt.largoMm) * ESCALA;
       const anchoEsc = palet.anchoOcupadoMm * ESCALA;
-      const altUnd = Math.max((palet.alturaMm / palet.unidades) * ESCALA, 0.01);
+      const desplazEsc = esUnionCapiculada ? (info?.desplazamientoCapiculadoMm ?? 0) * ESCALA : 0;
+      const xBase = largoEsc / 2 + desplazEsc;
+      const esCarga = info?.tipo === "carga";
+      const esFoam = info?.tipo === "foam";
+      // Para "foam", palet.unidades son los foams que lleva dentro la caja
+      // (p.ej. 225), no copias físicas de la caja — el alto de cada
+      // "unidad" del bucle de abajo no tiene sentido dividido entre 225:
+      // la caja entera mide su alto real, de un tirón.
+      const altUnd = esFoam
+        ? Math.max(palet.alturaMm * ESCALA, 0.01)
+        : Math.max((palet.alturaMm / palet.unidades) * ESCALA, 0.01);
       const geoU = new THREE.BoxGeometry(largoEsc * 0.95, altUnd * 0.92, anchoEsc * 0.95);
       const geoB = new THREE.EdgesGeometry(geoU);
       geomsLocal.push(geoU, geoB);
@@ -313,24 +360,14 @@ export function crearEscena3D(
       const matB = new THREE.LineBasicMaterial({ color: 0x0a1410, transparent: true, opacity: 0.4 });
       matsLocal.push(matU, matB);
 
-      const info = crateInfoPorRef?.get(palet.referenceId);
-      const esCarga = info?.tipo === "carga";
       const geomPalet = detalle
         ? (esCarga && info?.paletBase ? crateGeomPorRef?.get(info.paletBase) : crateGeomPorRef?.get(palet.referenceId))
         : null;
-      const pt = palet.palletType;
-      // rotHuella detecta el giro comparando las medidas YA intercambiadas
-      // (las de ESTE nivel — no las de sd/toda la pila, que con apilado
-      // manual entre referencias distintas puede tener otra huella)
-      // contra las medidas canónicas del tipo de palet: ya refleja cualquier
-      // giro, sea el que eligió el packer por defecto o el que acaba de hacer
-      // el usuario a mano (rotarPila intercambia esas mismas medidas).
       // El flag manual (rotacionVisual) solo aporta información EXTRA cuando
       // la huella es cuadrada: ahí largoMm/anchoMm no cambian al rotar, así
-      // que la comparación de medidas no puede decir nada y hace falta el
-      // flag explícito para saber hacia qué lado está girada la pieza.
+      // que rotHuella no puede decir nada y hace falta el flag explícito
+      // para saber hacia qué lado está girada la pieza.
       const esCuadrada = pt.largoMm === pt.anchoMm;
-      const rotHuella = Math.abs(palet.largoOcupadoMm - pt.largoMm) > Math.abs(palet.largoOcupadoMm - pt.anchoMm);
       const rotManual = rotacionVisual?.get(sd.stackKey) ?? false;
       const rotado = esCarga ? rotHuella : (esCuadrada ? rotManual : rotHuella);
       // La geometría real ("Detalle 3D") se construye a partir del crateJson
@@ -486,20 +523,39 @@ export function crearEscena3D(
           }
         }
       } else {
-        for (let i = 0; i < palet.unidades; i++) {
+        // "foam": palet.unidades son los FOAMS que lleva dentro esta caja
+        // (225, por ejemplo) — no hay que dibujar 225 copias de la caja,
+        // solo UNA. El bucle de abajo (repetir palet.unidades veces) es
+        // para flejados de verdad: varias cajas físicas idénticas
+        // apiladas dentro del mismo pack.
+        const repeticiones = esFoam ? 1 : palet.unidades;
+        for (let i = 0; i < repeticiones; i++) {
           if (geomPalet) {
             const cm = construirMeshCrate(THREE, geomPalet, {
               colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
               desmontado: !!info?.esDesmontado,
             });
             registrarRecursosDe(cm);
-            cm.position.set(largoEsc / 2, localY + altUnd * i, anchoEsc / 2);
             cm.traverse((o: any) => { if (o.isMesh || o.isLineSegments) o.userData = { stackKey: sd.stackKey, isCargo: o.isMesh }; });
+            if (esUnionCapiculada) {
+              // Voltear 180° de verdad: la pieza ya se posiciona centrada
+              // en X/Z pero apoyada en el suelo en Y (Y=0 es su propio
+              // suelo, no su centro — así es como se coloca la pieza
+              // normal, aquí abajo, sin rotar). Rotando 180° sobre el
+              // propio eje X de la pieza, su suelo (Y local=0) pasa a
+              // quedar arriba del todo — por eso el punto de referencia en
+              // Y hay que subirlo su propia altura completa, para que siga
+              // ocupando el mismo hueco de siempre, solo que boca abajo.
+              cm.rotation.x = Math.PI;
+              cm.position.set(xBase, localY + altUnd * (i + 1), anchoEsc / 2);
+            } else {
+              cm.position.set(xBase, localY + altUnd * i, anchoEsc / 2);
+            }
             group.add(cm);
           } else {
             const cy = localY + altUnd * (i + 0.5);
             const mesh = new THREE.Mesh(geoU, matU);
-            mesh.position.set(largoEsc / 2, cy, anchoEsc / 2);
+            mesh.position.set(xBase, cy, anchoEsc / 2);
             mesh.userData = { stackKey: sd.stackKey, isCargo: true };
             group.add(mesh);
             const borde = new THREE.LineSegments(geoB, matB);
@@ -509,7 +565,6 @@ export function crearEscena3D(
           }
         }
       }
-      localY += palet.alturaMm * ESCALA;
     }
     recursosPorStack.set(sd.stackKey, { geoms: geomsLocal, mats: matsLocal });
     return group;
@@ -736,6 +791,11 @@ export function crearEscena3D(
     const { anchoInteriorMm, largoInteriorMm } = camion.truckProfile;
     if (newX < 0 || newX + anchoMm > anchoInteriorMm) return true;
     if (newY < 0 || newY + largoMm > largoInteriorMm) return true;
+    // Sin margen de tolerancia: un solape, por pequeño que sea, se ve — y
+    // eso importa más que poder devolver algo a su posición EXACTA con el
+    // ratón. Para ese último ajuste fino están las flechas del teclado
+    // (onKeyDown, más abajo), que mueven de milímetro en milímetro sin
+    // arriesgarse nunca a un solape de verdad.
     for (const p of paletsMutable) {
       if (p.nivel !== 0 || excludeIds.has(p.id)) continue;
       const ox = newX < p.x + p.anchoOcupadoMm && newX + anchoMm > p.x;
@@ -786,7 +846,7 @@ export function crearEscena3D(
   }
 
   function setColorPila(g: THREE.Group, hex: number, alpha = 1) {
-    g.children.forEach(c => {
+    g.traverse(c => {
       if (c instanceof THREE.Mesh && c.userData.isCargo) {
         const m = c.material as THREE.MeshStandardMaterial;
         m.color.setHex(hex);
@@ -800,7 +860,7 @@ export function crearEscena3D(
   function restaurarColorPila(g: THREE.Group) {
     const sd = g.userData as StackData;
     const colorHex = colorPorReferencia.get(sd.refId) ?? "#4fd1c5";
-    g.children.forEach(c => {
+    g.traverse(c => {
       if (c instanceof THREE.Mesh && c.userData.isCargo) {
         const m = c.material as THREE.MeshStandardMaterial;
         m.color.set(colorHex);
@@ -897,6 +957,11 @@ export function crearEscena3D(
     // Las pilas bloqueadas solo permiten selección, nunca arrastre
     if (!sd.bloqueado) {
       potentialDrag = g;
+      // Desactivar la órbita YA, no cuando se supere el umbral de arrastre
+      // más abajo — si no, los controles de órbita alcanzan a reaccionar al
+      // primer tramo de movimiento del ratón (antes de decidir si esto es
+      // un arrastre de verdad), y la cámara da un pequeño salto molesto.
+      controls.enabled = false;
     }
   }
 
@@ -905,7 +970,6 @@ export function crearEscena3D(
     const dist = Math.hypot(e.clientX - mouseDownPx.x, e.clientY - mouseDownPx.y);
     if (!isDragging && dist > DRAG_THRESHOLD_PX) {
       isDragging = true;
-      controls.enabled = false;
       const intersect = getFloorIntersect(e);
       if (intersect) dragStartIntersect.copy(intersect);
       dragOriginalPos.copy(potentialDrag.position);
@@ -993,9 +1057,40 @@ export function crearEscena3D(
     potentialDrag = null;
   }
 
+  /**
+   * Mueve la pila seleccionada con las flechas del teclado — el ratón puede
+   * ser tedioso para ajustes finos. Paso normal 10mm, con Shift 50mm (salto
+   * más grande). No roba las flechas si el foco está en un campo de texto
+   * en cualquier otra parte de la página.
+   */
+  function onKeyDown(e: KeyboardEvent) {
+    if (!modoManual || !stackSeleccionado) return;
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+    const activo = document.activeElement;
+    if (activo && (activo.tagName === "INPUT" || activo.tagName === "TEXTAREA" || (activo as HTMLElement).isContentEditable)) return;
+    const sd = stackSeleccionado.userData as StackData;
+    if (sd.bloqueado || sd.enEspera) return; // fijada o aparcada: no se mueve
+    e.preventDefault();
+    const paso = e.shiftKey ? 50 : 10;
+    let dx = 0, dy = 0;
+    if (e.key === "ArrowLeft") dy = -paso;
+    else if (e.key === "ArrowRight") dy = paso;
+    else if (e.key === "ArrowUp") dx = -paso;
+    else if (e.key === "ArrowDown") dx = paso;
+    const nuevaX = sd.truckX + dx;
+    const nuevaY = sd.truckY + dy;
+    const excluir = new Set(sd.paletIds);
+    if (hayColisionCamion(excluir, nuevaX, nuevaY, sd.anchoMm, sd.largoMm)) return;
+    sd.truckX = nuevaX;
+    sd.truckY = nuevaY;
+    stackSeleccionado.position.set(nuevaY * ESCALA, 0, nuevaX * ESCALA);
+    onMoverCamion?.(sd.paletIds, nuevaX, nuevaY);
+  }
+
   renderer.domElement.addEventListener("mousedown", onMouseDown);
   renderer.domElement.addEventListener("mousemove", onMouseMove);
   renderer.domElement.addEventListener("mouseup",   onMouseUp);
+  window.addEventListener("keydown", onKeyDown);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(largo / 2, altoCam / 4, anchoCam / 2);
@@ -1099,6 +1194,7 @@ export function crearEscena3D(
       renderer.domElement.removeEventListener("mousedown", onMouseDown);
       renderer.domElement.removeEventListener("mousemove", onMouseMove);
       renderer.domElement.removeEventListener("mouseup",   onMouseUp);
+      window.removeEventListener("keydown", onKeyDown);
       controls.dispose();
       disponerRecursos(recursosCarcasa);
       for (const rec of recursosPorStack.values()) disponerRecursos(rec);

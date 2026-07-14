@@ -54,6 +54,35 @@ export interface Reference {
    * rastreles, girar la construcción 90° la dejaría inaccesible).
    */
   rotable?: boolean;
+  /**
+   * Si es true, un pack parcial (menos unidades que unidadesPorPalet) usa
+   * SIEMPRE la altura completa (alturaPaletCompletoMm), sin encoger
+   * proporcionalmente al llenado — para referencias tipo "foam", donde la
+   * caja que las contiene tiene una medida exterior fija, da igual cuántos
+   * foams lleve dentro. Por defecto (undefined/false) se mantiene el
+   * comportamiento de siempre (encoger proporcionalmente, como una torre
+   * de unidades apiladas que efectivamente es más baja si hay menos).
+   */
+  alturaFija?: boolean;
+  /**
+   * Cuánta altura se gana por cada unión al apilar en "capiculado" (un
+   * palet del derecho, el siguiente del revés y desplazado, para que el
+   * cubrir tipo jaula de ambos se entrelace en cremallera) — el grosor de
+   * una capa de cubrir, calculado de la geometría, no un dato manual. Solo
+   * tiene sentido con apoyoType "tacos" y cubrirType "jaula"; para el resto
+   * de construcciones queda a 0/undefined.
+   */
+  alturaGanadaCapiculadoMm?: number;
+  /**
+   * Cuánto se desplaza en horizontal (mm) el nivel invertido de una unión
+   * capiculada, para que sus tacos caigan en el hueco entre los tacos de
+   * abajo en vez de encima — sin este desplazamiento, dos piezas de madera
+   * sólidas (los tacos) ocupan literalmente el mismo sitio, y por más que
+   * se reduzca la altura, se ven solapadas. Se aproxima con el ancho del
+   * propio taco (no hace falta la posición exacta de cada uno para que la
+   * vista 3D se vea razonable).
+   */
+  desplazamientoCapiculadoMm?: number;
 }
 
 /** Perfil de camión / remolque. Pensado para poder crear varios y elegir uno dinámicamente. */
@@ -73,6 +102,15 @@ export interface TruckProfile {
    * rotar libremente cualquier bulto sin mirar `reference.rotable`.
    */
   cargaLateral?: boolean;
+  /**
+   * Si se usa apilado "capiculado" cuando la geometría lo permite (bases de
+   * tacos): alternar un palet del derecho y el siguiente del revés,
+   * desplazado, para que sus tacos se entrelacen con los del de abajo en
+   * vez de apoyar plano encima — se gana la altura de los tacos en cada
+   * unión. Solo afecta al cálculo automático del packer, nunca al apilado
+   * manual.
+   */
+  capiculado?: boolean;
 }
 
 /** Línea de pedido: cuánto se pide de cada referencia */

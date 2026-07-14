@@ -1,6 +1,7 @@
 import "./style.css";
 import {
   planificarCargaCamion,
+  recalcularMetricasCamion,
   DEFAULT_TRUCK_PROFILE,
   SIN_LIMITE_PESO_KG,
   type ObstaculoPlanta,
@@ -26,7 +27,7 @@ const CATALOGO_BASE: Reference[] = [];
 const CANTIDADES_INICIALES: Record<string, number> = {};
 // JSON del constructor por referencia cargada (para el visor 3D real futuro).
 const crateGeomPorRef = new Map<string, unknown>();
-const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null }>();
+const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null; desplazamientoCapiculadoMm: number }>();
 const crateRefsCrudas = new Map<string, CrateReference>();
 
 let customRefs: Reference[] = [];
@@ -200,8 +201,8 @@ document.getElementById("app")!.innerHTML = `
         <h2>Apilado manual entre referencias</h2>
         <p class="auto-hint">Declara qué referencia se puede arrastrar encima de cuál (no afecta al cálculo automático, solo a cuando arrastras una pila sobre otra ya puesta).</p>
         <div class="custom-ref-row">
-          <label class="field field--wide"><span>Arriba</span><select id="ap-arriba"></select></label>
-          <label class="field field--wide"><span>Puede ir sobre</span><select id="ap-abajo"></select></label>
+          <label class="field field--wide"><span>Arriba</span><input type="text" id="ap-arriba" list="ap-arriba-lista" placeholder="Busca por SKU o nombre..." autocomplete="off"/><datalist id="ap-arriba-lista"></datalist></label>
+          <label class="field field--wide"><span>Puede ir sobre</span><input type="text" id="ap-abajo" list="ap-abajo-lista" placeholder="Busca por SKU o nombre..." autocomplete="off"/><datalist id="ap-abajo-lista"></datalist></label>
         </div>
         <button class="btn-add-ref" id="btn-add-apilable">+ Añadir regla</button>
         <div id="apilable-lista"></div>
@@ -219,6 +220,10 @@ document.getElementById("app")!.innerHTML = `
         <label class="checkbox-field">
           <input type="checkbox" id="cb-carga-lateral"/>
           <span>Admite carga lateral (si no, solo por la puerta trasera)</span>
+        </label>
+        <label class="checkbox-field">
+          <input type="checkbox" id="cb-capiculado"/>
+          <span>Apilado capiculado (donde la construcción lo permita — bases de tacos)</span>
         </label>
         <label class="checkbox-field">
           <input type="checkbox" id="cb-varios"/>
@@ -371,6 +376,7 @@ function restaurarEstadoGuardado(): boolean {
   (document.getElementById("truck-alto")  as HTMLInputElement).value = String(truckProfile.altoInteriorMm / 10);
   (document.getElementById("truck-peso")  as HTMLInputElement).value = String(truckProfile.pesoMaxKg);
   (document.getElementById("cb-carga-lateral") as HTMLInputElement).checked = !!truckProfile.cargaLateral;
+  (document.getElementById("cb-capiculado") as HTMLInputElement).checked = !!truckProfile.capiculado;
   (document.getElementById("cb-varios")   as HTMLInputElement).checked = permitirVarios;
   (document.getElementById("cb-detalle")  as HTMLInputElement).checked = detalle3D;
   actualizarMeta();
@@ -497,16 +503,25 @@ function renderOrderRows() {
   renderApilamientoPanel();
 }
 
+// Texto mostrado en los campos de búsqueda de apilado (SKU + nombre, para
+// poder filtrar por cualquiera de los dos) → id de la referencia.
+const apilableBusquedaAId = new Map<string, string>();
+
 function renderApilamientoPanel() {
   const catalogo = catalogoCompleto();
-  const selArriba = document.getElementById("ap-arriba") as HTMLSelectElement;
-  const selAbajo = document.getElementById("ap-abajo") as HTMLSelectElement;
-  const opciones = catalogo.map(r => `<option value="${r.id}">${r.sku}</option>`).join("");
-  const prevArriba = selArriba.value, prevAbajo = selAbajo.value;
-  selArriba.innerHTML = opciones;
-  selAbajo.innerHTML = opciones;
-  if (catalogo.some(r => r.id === prevArriba)) selArriba.value = prevArriba;
-  if (catalogo.some(r => r.id === prevAbajo)) selAbajo.value = prevAbajo;
+  const datalistArriba = document.getElementById("ap-arriba-lista") as HTMLDataListElement;
+  const datalistAbajo = document.getElementById("ap-abajo-lista") as HTMLDataListElement;
+
+  apilableBusquedaAId.clear();
+  const opciones = [...catalogo]
+    .sort((a, b) => a.sku.localeCompare(b.sku))
+    .map(r => {
+      const texto = r.nombre && r.nombre !== r.sku ? `${r.sku} — ${r.nombre}` : r.sku;
+      apilableBusquedaAId.set(texto, r.id);
+      return `<option value="${texto}"></option>`;
+    }).join("");
+  datalistArriba.innerHTML = opciones;
+  datalistAbajo.innerHTML = opciones;
 
   const listaEl = document.getElementById("apilable-lista")!;
   const filas: string[] = [];
@@ -539,12 +554,19 @@ function renderApilamientoPanel() {
   });
 }
 document.getElementById("btn-add-apilable")!.addEventListener("click", () => {
-  const arriba = (document.getElementById("ap-arriba") as HTMLSelectElement).value;
-  const abajo = (document.getElementById("ap-abajo") as HTMLSelectElement).value;
-  if (!arriba || !abajo || arriba === abajo) return;
+  const inputArriba = document.getElementById("ap-arriba") as HTMLInputElement;
+  const inputAbajo = document.getElementById("ap-abajo") as HTMLInputElement;
+  const arriba = apilableBusquedaAId.get(inputArriba.value);
+  const abajo = apilableBusquedaAId.get(inputAbajo.value);
+  if (!arriba || !abajo) {
+    alert("Elige una referencia de la lista en los dos campos (empieza a escribir el SKU o el nombre).");
+    return;
+  }
+  if (arriba === abajo) return;
   const actuales = apilableSobre[arriba] ?? [];
   if (!actuales.includes(abajo)) {
     apilableSobre = { ...apilableSobre, [arriba]: [...actuales, abajo] };
+    inputArriba.value = ""; inputAbajo.value = "";
     renderApilamientoPanel();
     guardarEstadoDebounced();
   }
@@ -593,9 +615,12 @@ function recomponerRefs() {
   crateInfoPorRef.clear();
   for (const cr of crateRefsCrudas.values()) {
     try {
-      customRefs.push(crateReferenceAReference(cr, crateRefsCrudas, crateGeomPorRef, unidadesCargaOverride.get(cr.id), columnasCargaOverride.get(cr.id)));
+      const refConstruida = crateReferenceAReference(cr, crateRefsCrudas, crateGeomPorRef, unidadesCargaOverride.get(cr.id), columnasCargaOverride.get(cr.id));
+      customRefs.push(refConstruida);
       // Para tipo "carga" el intercambio lo marca el PALET BASE (lo que
       // agarra la carretilla), no la lámina — igual que en crateToReference.ts.
+      // "foam" no necesita este caso especial: usa su propio crateJson (la
+      // caja que diseñaste), como cualquier caja/jaula/palet normal.
       const crateJsonParaIntercambio = cr.tipo === "carga" && cr.paletBase
         ? crateRefsCrudas.get(cr.paletBase)?.crateJson
         : cr.crateJson;
@@ -621,6 +646,7 @@ function recomponerRefs() {
         esDesmontado: !!cr.desmontado,
         intercambiado: debeIntercambiarParaCamion(crateJsonParaIntercambio),
         disposicion,
+        desplazamientoCapiculadoMm: refConstruida.desplazamientoCapiculadoMm ?? 0,
       });
     } catch (e) {
       console.warn(e);
@@ -752,6 +778,12 @@ if (restaurarEstadoGuardado()) {
   planAuto();
 });
 
+(document.getElementById("cb-capiculado") as HTMLInputElement).addEventListener("change", e => {
+  truckProfile = { ...truckProfile, capiculado: (e.target as HTMLInputElement).checked };
+  guardarEstadoDebounced();
+  planAuto();
+});
+
 (document.getElementById("cb-varios") as HTMLInputElement).addEventListener("change", e => {
   permitirVarios = (e.target as HTMLInputElement).checked;
   planAuto();
@@ -841,15 +873,12 @@ function planificar() {
   if (planLibre.camiones.length > 0 && paletsBloq.length > 0) {
     const c0 = planLibre.camiones[0];
     const todosLosP = [...paletsBloq, ...c0.pallets];
-    const sueloT = (c0.truckProfile.largoInteriorMm / 1000) * (c0.truckProfile.anchoInteriorMm / 1000);
-    const sueloU = todosLosP.filter(p => p.nivel === 0).reduce((s, p) => s + (p.largoOcupadoMm / 1000) * (p.anchoOcupadoMm / 1000), 0);
-    planLibre.camiones[0] = {
-      ...c0,
-      pallets: todosLosP,
-      pesoTotalKg: todosLosP.reduce((s, p) => s + p.pesoKg, 0),
-      posicionesSueloUsadas: todosLosP.filter(p => p.nivel === 0).length,
-      ocupacionSuelo: Math.round((sueloU / sueloT) * 1000) / 10,
-    };
+    // Antes solo se recalculaban suelo y peso a mano; volumenUtilizadoM3,
+    // ocupacionVolumen y ocupacionPeso se quedaban con el valor de ANTES de
+    // sumar los palets bloqueados/manuales. recalcularMetricasCamion
+    // recalcula las cinco métricas juntas a partir de la lista combinada,
+    // así no pueden volver a desincronizarse entre sí.
+    planLibre.camiones[0] = recalcularMetricasCamion(c0.truckProfile, c0.numero, todosLosP);
   }
 
   resultado = planLibre;
