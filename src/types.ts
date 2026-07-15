@@ -35,6 +35,18 @@ export interface Reference {
   nombre: string;
   /** Unidades que caben en un palet completo de esta referencia */
   unidadesPorPalet: number;
+  /**
+   * Alto (mm) de UNA unidad física individual, cuando `unidadesPorPalet`
+   * representa piezas realmente apilables sueltas (p.ej. un fleje de N
+   * palets, cada uno con su propia estructura) en vez de "cajas sobre un
+   * palet" u otra unidad de conteo que no se apile pieza a pieza.
+   * undefined = no aplica (comportamiento de siempre: el pack completo se
+   * trata como UN bloque atómico con `alturaPaletCompletoMm`). Cuando está
+   * presente, el packer puede aplicar capiculado DENTRO del propio fleje,
+   * alternando unión a unión igual que entre palets sueltos — ver
+   * agruparEnPilas en packer.ts.
+   */
+  altoUnidadMm?: number;
   /** Lote de entrega mínimo: cantidad mínima que se puede servir de esta referencia */
   loteMinimo: number;
   /** Si se permite apilar otro palet encima de un palet de esta referencia */
@@ -92,17 +104,25 @@ export interface Reference {
    */
   alturaGanadaCapiculadoAltMm?: number;
   /**
-   * Cuánto se desplaza en horizontal (mm) el nivel invertido de una unión
-   * capiculada, para que sus tacos caigan en el hueco entre los tacos de
-   * abajo en vez de encima — sin este desplazamiento, dos piezas de madera
-   * sólidas (los tacos) ocupan literalmente el mismo sitio, y por más que
-   * se reduzca la altura, se ven solapadas. Se aproxima con el ancho del
-   * propio taco (no hace falta la posición exacta de cada uno para que la
-   * vista 3D se vea razonable). Solo se aplica en las uniones de cubrir
-   * (impares contando desde la 1ª-2ª); la unión alterna no desplaza nada,
-   * queda alineada con el nivel de dos más abajo.
+   * Cuánto se desplaza (mm) el nivel invertido de una unión capiculada,
+   * para que sus tacos caigan en el hueco entre los tacos de abajo en vez
+   * de encima — sin este desplazamiento, dos piezas de madera sólidas (los
+   * tacos) ocupan literalmente el mismo sitio, y por más que se reduzca la
+   * altura, se ven solapadas. Se calcula de la geometría real (huecos
+   * entre tablas del cubrir, y escuadrías de taco/rastrel — ver
+   * crateToReference.ts). Hace falta en TODAS las uniones impares (no solo
+   * las de cubrir): aunque la propia unión de cubrir no gane altura (ver
+   * alturaGanadaCapiculadoMm=0), el desplazamiento sigue siendo necesario
+   * para que la unión SIGUIENTE (taco-rastrel) tenga sitio.
    */
   desplazamientoCapiculadoMm?: number;
+  /**
+   * Por qué eje va el desplazamiento de arriba: false = por el largo (el
+   * de siempre), true = por el ancho. Depende de cómo esté orientado el
+   * cubrir — sus tablas ocupan un eje entero y se reparten por el otro, y
+   * el desplazamiento va por el eje de reparto, no siempre el largo.
+   */
+  desplazamientoCapiculadoEjeAncho?: boolean;
 }
 
 /** Perfil de camión / remolque. Pensado para poder crear varios y elegir uno dinámicamente. */
@@ -149,6 +169,11 @@ export interface PalletInstance {
   alturaMm: number;
   apilable: boolean;
   palletType: PalletType;
+  /** Copiado de Reference.altoUnidadMm (solo en packs completos — ver
+   * lotCalculator.ts). Presente = `unidades` son piezas apilables sueltas
+   * dentro de este mismo bulto, sobre las que el packer puede aplicar
+   * capiculado interno (ver agruparEnPilas en packer.ts). */
+  altoUnidadMm?: number;
 }
 
 /** Un palet ya colocado dentro de un camión, con su posición física */
@@ -164,6 +189,16 @@ export interface PlacedPallet extends PalletInstance {
   /** Huella ocupada en planta tras decidir orientación */
   largoOcupadoMm: number;
   anchoOcupadoMm: number;
+  /**
+   * Solo cuando `altoUnidadMm` está presente: índice global (0-based) de la
+   * PRIMERA subunidad de este bulto dentro de la secuencia PLANA de toda la
+   * pila — es decir, sin distinguir de qué fleje viene cada subunidad (ver
+   * conversación: la alternancia capiculado es continua entre flejes). Su
+   * paridad (par/impar) determina si la primera subunidad de este bulto
+   * arranca "normal" o "invertida"; scene3d.ts sigue alternando desde ahí
+   * para las siguientes `unidades - 1` subunidades del propio bulto.
+   */
+  subunidadGlobalInicial?: number;
 }
 
 /** Resultado de cargar un único camión */

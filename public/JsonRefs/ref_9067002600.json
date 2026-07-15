@@ -4,7 +4,7 @@
     "nombre": "9067002600",
     "tipo": "palet",
     "apilable": true,
-    "unidadesPorPack": 5,
+    "unidadesPorPack": 10,
     "exterior": {
       "largoCm": 100,
       "anchoCm": 100,
@@ -23,6 +23,7 @@
     "dimMode": "interior",
     "apoyoType": "tacos",
     "dbOrient": "ancho",
+    "useCapiculado": true,
     "dobleBaseAncho": 7,
     "dobleBaseAlto": 10,
     "claroMax": 50,

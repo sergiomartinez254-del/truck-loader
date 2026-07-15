@@ -84,6 +84,12 @@ function crearPalet(reference: Reference, unidades: number, esCompleto: boolean)
     alturaMm,
     apilable: reference.apilable,
     palletType: reference.palletType,
+    // Solo en packs COMPLETOS: un pack parcial encoge su altura de forma
+    // proporcional (ver alturaMm arriba), una aproximación que ya no
+    // representa "unidades piezas físicas apilables sueltas" con la
+    // precisión que el capiculado interno necesita — se deja sin activar
+    // ahí (comportamiento de siempre, bloque atómico).
+    altoUnidadMm: esCompleto ? reference.altoUnidadMm : undefined,
   };
 }
 

@@ -60,7 +60,7 @@ export interface EscenaOpciones {
   /** Aterriza `paletIds` justo encima del palet `objetivoPaletId`, al nuevo z/nivel indicados. */
   onApilarManual?: (paletIds: string[], objetivoPaletId: string, nuevoZ: number, nuevoNivel: number) => void;
   crateGeomPorRef?: Map<string, unknown>;
-  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null; desplazamientoCapiculadoMm: number }>;
+  crateInfoPorRef?: Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null; desplazamientoCapiculadoMm: number; desplazamientoCapiculadoEjeAncho: boolean; gananciaAMm: number; gananciaBMm: number }>;
   rotacionVisual?: Map<string, boolean>;
   detalle?: boolean;
   onRecuperarDeEspera?: (paletIds: string[], nuevaX: number, nuevaY: number) => void;
@@ -303,10 +303,6 @@ export function crearEscena3D(
       // este nivel en X (aparte de ir ya más pegado en Y) para que las
       // tablas de su cubrir caigan en los huecos del cubrir de abajo
       // (cremallera), no encima de las mismas tablas.
-      const nivelAnterior = idxNivel > 0 ? nivelesOrdenados[idxNivel - 1] : null;
-      const esUnionCapiculada = nivelAnterior != null
-        && palet.z < nivelAnterior.z + nivelAnterior.alturaMm
-        && idxNivel % 2 === 1; // solo los niveles "del revés" (1, 3, 5…) — los pares vuelven a la orientación normal, alineados con el nivel 0
       // Cada nivel usa SU PROPIA referencia (color, geometría, medidas) — no
       // la de sd/paletsPila[0]. Antes daba igual (una pila siempre era una
       // sola referencia, apilada por el packer automático), pero con el
@@ -328,26 +324,53 @@ export function crearEscena3D(
       // desplazamiento visible de la malla respecto al contorno blanco
       // (que si usa correctamente el valor ensanchado, porque el suyo es
       // el hueco reservado de la pila, no la pieza individual).
-      // anchoOcupadoMm nunca se ensancha (el desplazamiento capiculado solo
-      // afecta al largo), asi que es la unica huella fiable por nivel.
+      // anchoOcupadoMm normalmente no se ensancha (el desplazamiento
+      // capiculado solo afecta al largo) -- PERO rotarPila (main.ts)
+      // intercambia largoOcupadoMm<->anchoOcupadoMm al girar la pila 90°
+      // a mano, así que tras un giro el valor ensanchado puede acabar en
+      // anchoOcupadoMm igual que antes estaba en largoOcupadoMm. Por eso
+      // sigue haciendo falta anchoOcupadoMm (nunca ensanchado) para
+      // detectar el giro, pero NO para dibujar el tamaño de la pieza.
       const rotHuella = Math.abs(palet.anchoOcupadoMm - pt.anchoMm) > Math.abs(palet.anchoOcupadoMm - pt.largoMm);
       // Huella REAL de esta pieza (mm nativos del tipo de palet, orientados
-      // segun rotHuella) -- no palet.largoOcupadoMm, que para una pila
-      // capiculada de 2+ niveles es el hueco RESERVADO de toda la pila
-      // (mas ancho que una pieza suelta), no el tamano de esta pieza.
+      // segun rotHuella) -- ni palet.largoOcupadoMm ni palet.anchoOcupadoMm,
+      // que son el hueco RESERVADO de la pila (más ancho que una pieza
+      // suelta en capiculado, y encima intercambiable entre los dos ejes
+      // tras un giro manual — ver más arriba), no el tamaño de esta pieza.
       const largoEsc = (rotHuella ? pt.anchoMm : pt.largoMm) * ESCALA;
-      const anchoEsc = palet.anchoOcupadoMm * ESCALA;
-      const desplazEsc = esUnionCapiculada ? (info?.desplazamientoCapiculadoMm ?? 0) * ESCALA : 0;
-      const xBase = largoEsc / 2 + desplazEsc;
+      const anchoEsc = (rotHuella ? pt.largoMm : pt.anchoMm) * ESCALA;
       const esCarga = info?.tipo === "carga";
       const esFoam = info?.tipo === "foam";
-      // Para "foam", palet.unidades son los foams que lleva dentro la caja
-      // (p.ej. 225), no copias físicas de la caja — el alto de cada
-      // "unidad" del bucle de abajo no tiene sentido dividido entre 225:
-      // la caja entera mide su alto real, de un tirón.
+      // Alto de UNA subunidad física (mm), no palet.alturaMm/palet.unidades:
+      // desde que el packer comprime la altura de un fleje capiculado
+      // (agruparEnPilas en packer.ts), palet.alturaMm YA NO es un múltiplo
+      // exacto de palet.unidades, así que dividir daría una altura por
+      // pieza demasiado pequeña (aplastada). info.laminaAltoMm es el alto
+      // de una unidad SIN comprimir, la misma fuente que usa el packer.
+      const altUndMm = info?.laminaAltoMm ?? (palet.unidades > 0 ? palet.alturaMm / palet.unidades : palet.alturaMm);
       const altUnd = esFoam
         ? Math.max(palet.alturaMm * ESCALA, 0.01)
-        : Math.max((palet.alturaMm / palet.unidades) * ESCALA, 0.01);
+        : Math.max(altUndMm * ESCALA, 0.01);
+      // Alternancia capiculado DENTRO del propio bulto (fleje de 2+
+      // unidades): continúa la MISMA secuencia global que agruparEnPilas en
+      // packer.ts a partir de palet.subunidadGlobalInicial — por eso una
+      // pieza se entrelaza con la de al lado le venga del fleje que le
+      // venga, sin distinguir "dónde acaba un fleje y empieza el
+      // siguiente". Con 1 sola unidad por pack (el caso de siempre) esto
+      // reproduce EXACTAMENTE el comportamiento anterior (basado en el
+      // índice del nivel), porque subunidadGlobalInicial coincide con
+      // idxNivel cuando todos los packs traen 1 unidad.
+      const capiculadoOn = !!camion.truckProfile.capiculado;
+      const gananciaSubA = capiculadoOn ? (info?.gananciaAMm ?? 0) : 0;
+      const gananciaSubB = capiculadoOn ? (info?.gananciaBMm ?? 0) : 0;
+      const hayCapiculadoReal = gananciaSubA > 0 || gananciaSubB > 0;
+      const gananciaSub = (indiceUnion: number) => (indiceUnion % 2 === 0 ? gananciaSubA : gananciaSubB);
+      const subGlobal0 = palet.subunidadGlobalInicial ?? idxNivel;
+      const repeticiones = esFoam ? 1 : palet.unidades;
+      const zsSubMm: number[] = [0];
+      for (let i = 1; i < repeticiones; i++) {
+        zsSubMm.push(zsSubMm[i - 1] + Math.max(altUndMm - gananciaSub(subGlobal0 + i - 1), 1));
+      }
       const geoU = new THREE.BoxGeometry(largoEsc * 0.95, altUnd * 0.92, anchoEsc * 0.95);
       const geoB = new THREE.EdgesGeometry(geoU);
       geomsLocal.push(geoU, geoB);
@@ -528,8 +551,29 @@ export function crearEscena3D(
         // solo UNA. El bucle de abajo (repetir palet.unidades veces) es
         // para flejados de verdad: varias cajas físicas idénticas
         // apiladas dentro del mismo pack.
-        const repeticiones = esFoam ? 1 : palet.unidades;
         for (let i = 0; i < repeticiones; i++) {
+          // Invertida = misma alternancia continua que packer.ts, y solo si
+          // de verdad hay ganancia activa (checkbox capiculado del camión
+          // Y la referencia lo soporta) — si no, todas van "del derecho",
+          // sin desplazar, como siempre.
+          const subInvertida = hayCapiculadoReal && (subGlobal0 + i) % 2 === 1;
+          const desplazSubEsc = subInvertida ? (info?.desplazamientoCapiculadoMm ?? 0) * ESCALA : 0;
+          // El desplazamiento capiculado corre por el eje de reparto DEL
+          // CUBRIR (info.desplazamientoCapiculadoEjeAncho: false = largo de
+          // la pieza, true = ancho de la pieza — depende de la orientación
+          // del cubrir, ver crateToReference.ts) — y ese eje de la PIEZA no
+          // siempre es el eje X del render: `rotado` nos dice si el largo
+          // de la pieza está mapeado al X o al Z de esta celda. Hay que
+          // combinar los dos (XOR): si la pieza está rotada, el eje de la
+          // pieza que tocaba en X pasa a tocar en Z y viceversa. Antes solo
+          // se miraba `rotado`, así que un cubrir repartido a lo ancho
+          // (poco habitual, pero real) se desplazaba siempre en el eje
+          // equivocado, tanto girada la pila como sin girar.
+          const ejeAncho = info?.desplazamientoCapiculadoEjeAncho ?? false;
+          const desplazEnZ = ejeAncho !== rotado;
+          const centroLargoEsc = largoEsc / 2 + (desplazEnZ ? 0 : desplazSubEsc);
+          const centroAnchoEsc = anchoEsc / 2 + (desplazEnZ ? desplazSubEsc : 0);
+          const zSubEsc = zsSubMm[i] * ESCALA;
           if (geomPalet) {
             const cm = construirMeshCrate(THREE, geomPalet, {
               colorBase: colorHex, opacidad: sd.enEspera ? 0.75 : 1.0, conAristas: true, rotar90: rotadoGeometriaReal, escala: ESCALA,
@@ -537,7 +581,7 @@ export function crearEscena3D(
             });
             registrarRecursosDe(cm);
             cm.traverse((o: any) => { if (o.isMesh || o.isLineSegments) o.userData = { stackKey: sd.stackKey, isCargo: o.isMesh }; });
-            if (esUnionCapiculada) {
+            if (subInvertida) {
               // Voltear 180° de verdad: la pieza ya se posiciona centrada
               // en X/Z pero apoyada en el suelo en Y (Y=0 es su propio
               // suelo, no su centro — así es como se coloca la pieza
@@ -547,15 +591,15 @@ export function crearEscena3D(
               // Y hay que subirlo su propia altura completa, para que siga
               // ocupando el mismo hueco de siempre, solo que boca abajo.
               cm.rotation.x = Math.PI;
-              cm.position.set(xBase, localY + altUnd * (i + 1), anchoEsc / 2);
+              cm.position.set(centroLargoEsc, localY + zSubEsc + altUnd, centroAnchoEsc);
             } else {
-              cm.position.set(xBase, localY + altUnd * i, anchoEsc / 2);
+              cm.position.set(centroLargoEsc, localY + zSubEsc, centroAnchoEsc);
             }
             group.add(cm);
           } else {
-            const cy = localY + altUnd * (i + 0.5);
+            const cy = localY + zSubEsc + altUnd / 2;
             const mesh = new THREE.Mesh(geoU, matU);
-            mesh.position.set(xBase, cy, anchoEsc / 2);
+            mesh.position.set(centroLargoEsc, cy, centroAnchoEsc);
             mesh.userData = { stackKey: sd.stackKey, isCargo: true };
             group.add(mesh);
             const borde = new THREE.LineSegments(geoB, matB);

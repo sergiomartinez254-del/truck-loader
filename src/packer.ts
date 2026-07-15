@@ -21,6 +21,11 @@ interface PilaUnidad {
    * permite que la pila tenga cualquier número de niveles sin tener que
    * recordar en qué unión iba cada uno al colocarla o volver a moverla. */
   alturasRelativas: number[];
+  /** Índice global (0-based) de la primera SUBUNIDAD de cada palet (mismo
+   * orden que `pallets`/`alturasRelativas`) dentro de la secuencia plana de
+   * toda la pila — solo relevante para palets con `altoUnidadMm` (fleje de
+   * 2+ piezas apilables sueltas). Ver PlacedPallet.subunidadGlobalInicial. */
+  subunidadesGlobalesIniciales: number[];
 }
 
 interface Orientacion {
@@ -103,44 +108,102 @@ function agruparEnPilas(
   const gananciaB = (truckProfile.capiculado && reference.alturaGanadaCapiculadoAltMm)
     ? reference.alturaGanadaCapiculadoAltMm
     : 0;
-  // Unión de índice 0 conecta nivel0-nivel1, índice 1 conecta nivel1-nivel2,
-  // etc. — pares usan gananciaA, impares gananciaB.
+  // Unión de índice 0 conecta subunidad0-subunidad1, índice 1 conecta
+  // subunidad1-subunidad2, etc. — pares usan gananciaA, impares gananciaB.
   const gananciaDeUnion = (indiceUnion: number) => (indiceUnion % 2 === 0 ? gananciaA : gananciaB);
-  // Altura que añade CADA unión entre dos palets consecutivos de la pila:
-  // la primera pieza suma su alto completo, cada una a partir de la
+  // Altura que añade CADA unión entre dos SUBUNIDADES consecutivas:
+  // la primera de todas suma su alto completo, cada una a partir de la
   // segunda "ahorra" la ganancia de su unión (sus tacos se entrelazan con
   // los de la anterior en vez de apoyar plano encima).
-  const alturaDeUnion = (p: PalletInstance, indiceUnion: number) => Math.max(p.alturaMm - gananciaDeUnion(indiceUnion), 1);
+  const alturaDeUnion = (alturaSubunidadMm: number, indiceUnion: number) => Math.max(alturaSubunidadMm - gananciaDeUnion(indiceUnion), 1);
   // El nivel invertido de cada unión de cubrir se desplaza hacia un lado
   // (ver scene3d.ts) para que las tablas del cubrir entrelacen en
   // cremallera — ese desplazamiento sale del hueco "normal" de la pila, así
   // que hay que ampliar la huella reservada en planta (en el sentido del
   // largo) para que el packer no coloque otra pila justo al lado y acaben
-  // chocando visualmente. Solo aplica si de verdad hay alguna unión de
-  // cubrir (2+ palets); la unión alterna (taco-rastrel) no desplaza nada,
-  // el nivel normal vuelve a quedar alineado con el nivel de dos más abajo.
-  const desplazamiento = gananciaA > 0 ? (reference.desplazamientoCapiculadoMm ?? 0) : 0;
+  // chocando visualmente.
+  //
+  // El desplazamiento hace falta si GANA ALGO cualquiera de las dos
+  // uniones — no solo la de cubrir. Cuando el cubrir no tiene claro
+  // suficiente para entrelazar (gananciaA=0, ver crateToReference.ts), el
+  // nivel invertido sigue desplazándose igual: es lo que deja sitio para
+  // que la unión SIGUIENTE (taco-rastrel, gananciaB) pueda colar sus tacos
+  // sin chocar con los del nivel invertido. Sin ese desplazamiento, el
+  // nivel invertido queda alineado con el de dos más abajo y la unión
+  // taco-rastrel tampoco puede ganar nada — se perdería la optimización de
+  // altura en cadena, no solo en la unión que falló el hueco.
+  const desplazamiento = (gananciaA > 0 || gananciaB > 0) ? (reference.desplazamientoCapiculadoMm ?? 0) : 0;
+  // El eje del desplazamiento (reference.desplazamientoCapiculadoEjeAncho)
+  // viene calculado en el marco NATIVO de palletType.largoMm/anchoMm — si
+  // ADEMÁS el propio packer decidió colocar esta referencia girada 90°
+  // respecto a ese marco (elegirOrientacion, más arriba), el eje también
+  // se intercambia, o la huella se ensancharía por el lado que ya no es.
+  const packerRotado = orientacion.largoOcupado !== reference.palletType.largoMm;
+  const desplazamientoEnAncho = (reference.desplazamientoCapiculadoEjeAncho ?? false) !== packerRotado;
 
-  // z de cada nivel relativo a la base de la pila (nivel 0 = 0), alternando
-  // gananciaA/gananciaB unión a unión.
-  const calcularAlturasRelativas = (lista: PalletInstance[]): number[] => {
-    const zs: number[] = [0];
-    for (let i = 1; i < lista.length; i++) {
-      zs.push(zs[i - 1] + alturaDeUnion(lista[i], i - 1));
+  // Cuántas SUBUNIDADES físicas apilables sueltas contiene este palet — un
+  // fleje de N (con altoUnidadMm presente) cuenta como N; cualquier otro
+  // caso (referencia sin geometría 3D, o pack parcial) cuenta como 1 bloque
+  // atómico, como siempre.
+  const subunidadesDe = (p: PalletInstance): number => (p.altoUnidadMm ? Math.max(1, p.unidades) : 1);
+  const alturaSubunidadDe = (p: PalletInstance): number => p.altoUnidadMm ?? p.alturaMm;
+
+  /**
+   * Aplana TODOS los palets de `lista` en su secuencia de subunidades y
+   * alterna gananciaA/gananciaB de forma CONTINUA a lo largo de toda la
+   * pila — sin distinguir en qué fleje (palet) cae cada subunidad: una
+   * unidad se entrelaza con la de al lado le venga del fleje que le venga
+   * (confirmado con el usuario). Devuelve, en una sola pasada: el z propio
+   * de cada palet de `lista` (mismo orden/longitud) relativo a la base de
+   * la pila, el índice global de su primera subunidad, y la altura total
+   * de la pila entera de suelo a techo (ya comprimida).
+   */
+  const calcularInfoDePila = (
+    lista: PalletInstance[]
+  ): { porPalet: { zBase: number; subunidadGlobalInicial: number; alturaComprimidaMm: number }[]; alturaTotalMm: number } => {
+    const porPalet: { zBase: number; subunidadGlobalInicial: number; alturaComprimidaMm: number }[] = [];
+    let zActual = 0;
+    let hActual = 0; // alto de la última subunidad colocada, para el techo final
+    let subunidadGlobal = 0;
+    for (const p of lista) {
+      const n = subunidadesDe(p);
+      const h = alturaSubunidadDe(p);
+      const subunidadGlobalInicial = subunidadGlobal;
+      let zBase = zActual;
+      for (let i = 0; i < n; i++) {
+        if (subunidadGlobal > 0) zActual += alturaDeUnion(h, subunidadGlobal - 1);
+        if (i === 0) zBase = zActual;
+        subunidadGlobal++;
+      }
+      hActual = h;
+      // Altura propia de ESTE palet (de su primera a su última subunidad,
+      // ya comprimida por sus uniones INTERNAS si tiene 2+) — no la altura
+      // bruta (altoUnidadMm × unidades) que traía de fábrica. Sin esto, un
+      // fleje de 10 seguiría reservando/mostrando su altura sin comprimir
+      // aunque el HUECO hasta el siguiente palet de la pila sí estuviera
+      // bien calculado.
+      const alturaComprimidaMm = (zActual + h) - zBase;
+      porPalet.push({ zBase, subunidadGlobalInicial, alturaComprimidaMm });
     }
-    return zs;
+    return { porPalet, alturaTotalMm: lista.length === 0 ? 0 : zActual + hActual };
   };
 
   const empaquetarComoUnidad = (lista: PalletInstance[]): PilaUnidad => {
-    const alturasRelativas = calcularAlturasRelativas(lista);
+    const { porPalet, alturaTotalMm } = calcularInfoDePila(lista);
+    const totalSubunidades = lista.reduce((s, p) => s + subunidadesDe(p), 0);
     return {
       referenceId: reference.id,
-      pallets: lista,
-      anchoMm: orientacion.anchoOcupado,
-      largoMm: orientacion.largoOcupado + (lista.length >= 2 ? desplazamiento : 0),
-      alturaTotalMm: lista.length === 0 ? 0 : alturasRelativas[lista.length - 1] + lista[lista.length - 1].alturaMm,
+      // Copias con alturaMm ya corregida a la comprimida — así todo lo que
+      // lea PlacedPallet.alturaMm más abajo (caja de colisión, volumen,
+      // posición del siguiente nivel) ve el valor real sin tener que saber
+      // nada de capiculado ni de subunidades.
+      pallets: lista.map((p, idx) => ({ ...p, alturaMm: porPalet[idx].alturaComprimidaMm })),
+      anchoMm: orientacion.anchoOcupado + (totalSubunidades >= 2 && desplazamientoEnAncho ? desplazamiento : 0),
+      largoMm: orientacion.largoOcupado + (totalSubunidades >= 2 && !desplazamientoEnAncho ? desplazamiento : 0),
+      alturaTotalMm,
       pesoTotalKg: lista.reduce((s, p) => s + p.pesoKg, 0),
-      alturasRelativas,
+      alturasRelativas: porPalet.map((i) => i.zBase),
+      subunidadesGlobalesIniciales: porPalet.map((i) => i.subunidadGlobalInicial),
     };
   };
 
@@ -149,15 +212,15 @@ function agruparEnPilas(
   }
 
   let pilaActual: PalletInstance[] = [];
-  let alturaActual = 0;
   let pesoActual = 0;
 
   for (const palet of palets) {
     const esPrimero = pilaActual.length === 0;
-    // La unión que se crearía al añadir este palet es la de índice
-    // pilaActual.length-1 (0 si pilaActual ya tiene 1 elemento, 1 si tiene
-    // 2, ...) — mismo criterio que calcularAlturasRelativas.
-    const alturaSiSeAñade = esPrimero ? palet.alturaMm : alturaActual + alturaDeUnion(palet, pilaActual.length - 1);
+    // Incluso el primer palet de la pila puede necesitar comprimirse (un
+    // fleje grande de 10+ unidades ya se entrelaza internamente consigo
+    // mismo), así que se calcula igual que el resto en vez de leer
+    // palet.alturaMm en bruto.
+    const alturaSiSeAñade = calcularInfoDePila([...pilaActual, palet]).alturaTotalMm;
     const pesoSiSeAñade = pesoActual + palet.pesoKg;
 
     const cabe = esPrimero
@@ -167,12 +230,10 @@ function agruparEnPilas(
 
     if (cabe) {
       pilaActual.push(palet);
-      alturaActual = alturaSiSeAñade;
       pesoActual = pesoSiSeAñade;
     } else {
       if (pilaActual.length > 0) pilas.push(empaquetarComoUnidad(pilaActual));
       pilaActual = [palet];
-      alturaActual = palet.alturaMm;
       pesoActual = palet.pesoKg;
     }
   }
@@ -442,6 +503,7 @@ function empacarUnCamion(
         nivel,
         largoOcupadoMm: largoOcupado,
         anchoOcupadoMm: anchoOcupado,
+        subunidadGlobalInicial: pila.subunidadesGlobalesIniciales[nivel],
       });
     });
   }
@@ -465,6 +527,7 @@ function empacarUnCamion(
               nivel,
               largoOcupadoMm: colocacion.largoOcupado,
               anchoOcupadoMm: colocacion.anchoOcupado,
+              subunidadGlobalInicial: colocacion.pila.subunidadesGlobalesIniciales[nivel],
             });
           });
         }
@@ -624,6 +687,10 @@ function intentarRescatePorDesalojo(
       // funciona igual sean 2, 3 o más niveles con cualquier combinación de
       // uniones.
       const alturasRelativas = paletsDeLaPila.map((p) => p.z - base.z);
+      // Igual que alturasRelativas: se lee tal cual de cada palet ya
+      // colocado (0 si no venía de un fleje con capiculado interno) en vez
+      // de recalcularlo.
+      const subunidadesGlobalesIniciales = paletsDeLaPila.map((p) => p.subunidadGlobalInicial ?? 0);
       const ultimoPalet = paletsDeLaPila[paletsDeLaPila.length - 1];
       const pilaDesalojada: PilaUnidad = {
         referenceId: base.referenceId,
@@ -633,6 +700,7 @@ function intentarRescatePorDesalojo(
         alturaTotalMm: (ultimoPalet.z + ultimoPalet.alturaMm) - base.z,
         pesoTotalKg: paletsDeLaPila.reduce((s, p) => s + p.pesoKg, 0),
         alturasRelativas,
+        subunidadesGlobalesIniciales,
       };
 
       const restoDelCamion = camion.pallets.filter((p) => p.x !== base.x || p.y !== base.y);
@@ -657,6 +725,7 @@ function intentarRescatePorDesalojo(
             nivel,
             largoOcupadoMm: colocacion.largoOcupado,
             anchoOcupadoMm: colocacion.anchoOcupado,
+            subunidadGlobalInicial: colocacion.pila.subunidadesGlobalesIniciales[nivel],
           });
         });
       }

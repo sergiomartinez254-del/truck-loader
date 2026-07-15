@@ -27,7 +27,7 @@ const CATALOGO_BASE: Reference[] = [];
 const CANTIDADES_INICIALES: Record<string, number> = {};
 // JSON del constructor por referencia cargada (para el visor 3D real futuro).
 const crateGeomPorRef = new Map<string, unknown>();
-const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null; desplazamientoCapiculadoMm: number }>();
+const crateInfoPorRef = new Map<string, { tipo: string; paletBase: string | null; unidades: number; laminaAltoMm: number; laminaLargoCm: number; laminaAnchoCm: number; esDesmontado: boolean; intercambiado: boolean; disposicion: { columnas: number; colsLargo: number; colsAncho: number; girado: boolean } | null; desplazamientoCapiculadoMm: number; desplazamientoCapiculadoEjeAncho: boolean; gananciaAMm: number; gananciaBMm: number }>();
 const crateRefsCrudas = new Map<string, CrateReference>();
 
 let customRefs: Reference[] = [];
@@ -642,11 +642,28 @@ function recomponerRefs() {
       }
       crateInfoPorRef.set(cr.id, {
         tipo: cr.tipo, paletBase: cr.paletBase, unidades: cr.unidadesPorPack,
-        laminaAltoMm: cr.altoUnidadMm, laminaLargoCm: cr.largoMm / 10, laminaAnchoCm: cr.anchoMm / 10,
+        // refConstruida.altoUnidadMm (no cr.altoUnidadMm): para una
+        // referencia desmontada, cr.altoUnidadMm sigue siendo el alto de
+        // la pieza MONTADA (fijo, calculado al cargar el JSON) — el alto
+        // que de verdad se apila (paneles tumbados) sale de
+        // crateReferenceAReference, que ya elige cr.desmontado.altoMm
+        // cuando toca. Usar el de la pieza montada aquí desincroniza el
+        // render (que dibuja cada "unidad" separada este alto) de la z
+        // real que calculó el packer con la altura desmontada — las
+        // piezas se dibujaban flotando o enterradas según la diferencia.
+        laminaAltoMm: refConstruida.altoUnidadMm ?? cr.altoUnidadMm, laminaLargoCm: cr.largoMm / 10, laminaAnchoCm: cr.anchoMm / 10,
         esDesmontado: !!cr.desmontado,
         intercambiado: debeIntercambiarParaCamion(crateJsonParaIntercambio),
         disposicion,
         desplazamientoCapiculadoMm: refConstruida.desplazamientoCapiculadoMm ?? 0,
+        desplazamientoCapiculadoEjeAncho: refConstruida.desplazamientoCapiculadoEjeAncho ?? false,
+        // Para poder alternar cubrir/taco-rastrel TAMBIÉN dentro de un
+        // fleje de 2+ unidades (ver scene3d.ts) — antes solo hacía falta
+        // saber SI había capiculado (booleano), ahora hace falta poder
+        // recalcular la z de cada subunidad interna con la misma fórmula
+        // que agruparEnPilas en packer.ts.
+        gananciaAMm: refConstruida.alturaGanadaCapiculadoMm ?? 0,
+        gananciaBMm: refConstruida.alturaGanadaCapiculadoAltMm ?? 0,
       });
     } catch (e) {
       console.warn(e);
