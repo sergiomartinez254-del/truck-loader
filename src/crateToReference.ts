@@ -3,6 +3,7 @@ import type { Reference } from "./types";
 import { SIN_LIMITE_PESO_KG } from "./types";
 import { bboxNativoCrate } from "./crateMeshes";
 import { buildConfig, computePieces, type Cfg } from "./crateGeometry";
+import { piezasABoxes, type CajaAABB } from "./crateNormalize";
 
 /**
  * Una base de dobles bases (rastreles cruzados) solo se puede levantar con
@@ -63,7 +64,7 @@ export function debeIntercambiarParaCamion(crateJson: unknown): boolean {
  * undefined si no aplica, o si viene desmontada (la geometría desmontada es
  * un apilado de paneles planos, sin cubrir de por medio en ese sentido).
  */
-function calcularGananciaCapiculado(crateJson: unknown, desmontado: boolean): { gananciaMm: number; desplazamientoMm: number; desplazamientoEjeAncho: boolean } | undefined {
+function calcularGananciaCapiculado(crateJson: unknown, desmontado: boolean): { gananciaMm: number; desplazamientoMm: number; desplazamientoEjeAncho: boolean; cabeUnionAlterna: boolean } | undefined {
   if (desmontado || crateJson == null || typeof crateJson !== "object") return undefined;
   const cfg = crateJson as { apoyoType?: unknown; useCapiculado?: unknown; cubrirType?: unknown; cubrirGrosor?: unknown };
   if (cfg.apoyoType !== "tacos" || cfg.useCapiculado !== true || cfg.cubrirType !== "jaula") return undefined;
@@ -105,6 +106,7 @@ function calcularGananciaCapiculado(crateJson: unknown, desmontado: boolean): { 
   // unión siguiente tampoco puede ganar nada.
   let desplazamientoMm = 0;
   let cabeElEntrelazado = true;
+  let cabeUnionAlterna = true;
   let ejeAncho = false;
   try {
     const cfgCompleto = buildConfig(crateJson as Cfg);
@@ -126,35 +128,9 @@ function calcularGananciaCapiculado(crateJson: unknown, desmontado: boolean): { 
       desplazamientoMm = Math.round((pasoMedioCm / 2) * 10);
     }
 
-    // El desplazamiento tiene que ser AL MENOS el que evite que las piezas
-    // del nivel invertido choquen con las del nivel de dos más abajo (que
-    // vuelve a la posición sin desplazar). No basta con mirar taco contra
-    // taco: con la ganancia taco+rastrel (ver calcularGananciaCapiculadoAlt
-    // más abajo), el taco del nivel de arriba y el rastrel del invertido
-    // ocupan la MISMA franja de altura que el taco del invertido — así que
-    // hay que comprobar las tres parejas cuya franja se solapa: taco-taco,
-    // taco-rastrel y rastrel-taco. El taco y el rastrel casi nunca tienen
-    // exactamente el mismo tamaño (aquí 9,5 vs 10cm) ni sus rejillas caen
-    // exactamente en el mismo sitio, así que la pareja cruzada suele pedir
-    // más hueco que la pareja taco-taco por sí sola — de ahí que no baste
-    // con el ancho del taco a secas. Las posiciones del taco se leen del
-    // mismo eje que el desplazamiento (centerX si va por el largo, centerZ
-    // si va por el ancho) — el taco es una rejilla 2D, así que hay que
-    // elegir la coordenada correcta.
-    const tacos = piezas
-      .filter((p) => p.layer === "taco" && (p as { centerX?: unknown }).centerX != null)
-      .map((p) => ({
-        center: ejeAncho ? (p as { centerZ: number }).centerZ : (p as { centerX: number }).centerX,
-        ancho: (p as { largoPieza: number }).largoPieza,
-      }))
-      .sort((a, b) => a.center - b.center);
-    // Solo interesa una columna/fila de tacos en el eje del desplazamiento
-    // — los duplicados en el otro eje no aportan nada al chequeo.
-    const tacosUnaFila = tacos.filter((t, i) => tacos.findIndex((t2) => t2.center === t.center) === i);
-    const rastreles = piezas
-      .filter((p) => p.layer === "rastrel" && (p as { center?: unknown }).center != null)
-      .map((p) => ({ center: (p as { center: number }).center, ancho: (p as { ancho: number }).ancho }))
-      .sort((a, b) => a.center - b.center);
+    const tacoPiezas = piezas.filter((p) => p.layer === "taco" && (p as { centerX?: unknown }).centerX != null) as { centerX: number; centerZ: number; largoPieza: number }[];
+    const rastrelPiezas = piezas.filter((p) => p.layer === "rastrel" && (p as { center?: unknown }).center != null) as { center: number; ancho: number; orient?: string }[];
+    const rastrelDistribuyeEnEjeAncho = rastrelPiezas[0]?.orient === "largo";
 
     const minShiftSinSolape = (
       fijas: { center: number; ancho: number }[],
@@ -169,14 +145,65 @@ function calcularGananciaCapiculado(crateJson: unknown, desmontado: boolean): { 
       }
       return maxShiftCm;
     };
+    const solapaSinRemedio = (a: { center: number; ancho: number }[], b: { center: number; ancho: number }[]): boolean => {
+      const n = Math.min(a.length, b.length);
+      for (let i = 0; i < n; i++) {
+        const distancia = Math.abs(a[i].center - b[i].center);
+        if (distancia < (a[i].ancho + b[i].ancho) / 2) return true;
+      }
+      return false;
+    };
+    const unaFilaPorEje = (piezas2D: { centerX: number; centerZ: number; largoPieza: number }[], porAncho: boolean) => {
+      const proyectadas = piezas2D
+        .map((p) => ({ center: porAncho ? p.centerZ : p.centerX, ancho: p.largoPieza }))
+        .sort((a, b) => a.center - b.center);
+      return proyectadas.filter((t, i) => proyectadas.findIndex((t2) => t2.center === t.center) === i);
+    };
 
-    const minShiftCm = Math.max(
-      minShiftSinSolape(tacosUnaFila, tacosUnaFila),
-      minShiftSinSolape(tacosUnaFila, rastreles),
-      minShiftSinSolape(rastreles, tacosUnaFila)
-    );
-    if (minShiftCm > 0) {
-      desplazamientoMm = Math.max(desplazamientoMm, Math.round(minShiftCm * 10));
+    // Comprueba taco-rastrel para UN eje dado (true=ancho, false=largo) —
+    // se reutiliza para el eje del cubrir Y, si hace falta, para el otro.
+    const comprobarEje = (porAncho: boolean): { shiftCm: number; seguro: boolean } => {
+      const tacosEnEje = unaFilaPorEje(tacoPiezas, porAncho);
+      const rastreles = rastrelPiezas.map((p) => ({ center: p.center, ancho: p.ancho })).sort((a, b) => a.center - b.center);
+      if (rastreles.length === 0) {
+        return { shiftCm: minShiftSinSolape(tacosEnEje, tacosEnEje), seguro: true };
+      }
+      if (rastrelDistribuyeEnEjeAncho === porAncho) {
+        // Rastrel reparte por ESTE mismo eje: comparación directa válida.
+        const shiftCm = Math.max(
+          minShiftSinSolape(tacosEnEje, tacosEnEje),
+          minShiftSinSolape(tacosEnEje, rastreles),
+          minShiftSinSolape(rastreles, tacosEnEje)
+        );
+        return { shiftCm, seguro: true };
+      }
+      // Rastrel reparte por el OTRO eje: en este eje su .center no es
+      // comparable (coordenadas de ejes distintos). Solo vale taco-taco
+      // aquí; y hay que comprobar, en el eje perpendicular (el que este
+      // desplazamiento NUNCA toca), si taco y rastrel chocan sin remedio.
+      const tacosOtroEje = unaFilaPorEje(tacoPiezas, !porAncho);
+      const seguro = !solapaSinRemedio(tacosOtroEje, rastreles);
+      return { shiftCm: minShiftSinSolape(tacosEnEje, tacosEnEje), seguro };
+    };
+
+    const enEjeDelCubrir = comprobarEje(ejeAncho);
+    cabeUnionAlterna = enEjeDelCubrir.seguro;
+    if (enEjeDelCubrir.shiftCm > 0) {
+      desplazamientoMm = Math.max(desplazamientoMm, Math.round(enEjeDelCubrir.shiftCm * 10));
+    }
+
+    // Si la unión de cubrir YA fracasó (claro insuficiente, cabeElEntrelazado
+    // =false) y ADEMÁS el eje del cubrir no sirve para la unión alterna, el
+    // eje ya no está "reservado" para el cubrir — no gana nada ahí de todas
+    // formas. Probar el otro eje específicamente para taco-rastrel: si ahí
+    // SÍ hay hueco, usarlo (mejor una unión funcionando que ninguna).
+    if (!cabeElEntrelazado && !cabeUnionAlterna) {
+      const enOtroEje = comprobarEje(!ejeAncho);
+      if (enOtroEje.seguro) {
+        ejeAncho = !ejeAncho;
+        desplazamientoMm = Math.round(enOtroEje.shiftCm * 10);
+        cabeUnionAlterna = true;
+      }
     }
   } catch {
     // Si algo falla calculando la geometría, mejor sin desplazamiento (0)
@@ -184,36 +211,87 @@ function calcularGananciaCapiculado(crateJson: unknown, desmontado: boolean): { 
     // de altura, solo sin desplazar.
   }
 
-  if (!cabeElEntrelazado) return { gananciaMm: 0, desplazamientoMm, desplazamientoEjeAncho: ejeAncho };
-  return { gananciaMm: Math.round(cubrirGrosorCm * 10), desplazamientoMm, desplazamientoEjeAncho: ejeAncho };
+  if (!cabeElEntrelazado) return { gananciaMm: 0, desplazamientoMm, desplazamientoEjeAncho: ejeAncho, cabeUnionAlterna };
+  return { gananciaMm: Math.round(cubrirGrosorCm * 10), desplazamientoMm, desplazamientoEjeAncho: ejeAncho, cabeUnionAlterna };
 }
 
 /**
  * Ganancia (mm) de la unión ALTERNA en un apilado capiculado de 3+ palets —
  * la que conecta el nivel invertido con el siguiente nivel normal (2ª-3ª,
- * 4ª-5ª...). Es un mecanismo distinto al de `calcularGananciaCapiculado`
- * (cubrir contra cubrir): aquí el palet de arriba, en orientación normal,
- * apoya sus tacos en el rastrel del palet invertido de abajo. Ganancia =
- * grueso del taco + grueso del rastrel. No lleva desplazamiento propio: al
- * ir en orientación normal, queda alineado con el nivel de dos más abajo
- * (el desplazamiento de la unión cubrir-cubrir ya deja hueco de sobra).
+ * 4ª-5ª...). Se calcula "dejando caer" la geometría nativa del palet (sin
+ * voltear) sobre la del palet invertido — ya volteado y desplazado con el
+ * eje/cantidad que decidió calcularGananciaCapiculado — y viendo en qué Z
+ * topa de verdad con algo sólido (el máximo, entre todas las parejas de
+ * piezas que se solapan en planta, de "techo de la pieza de abajo").
+ *
+ * Antes se aproximaba con "taco + rastrel" a secas, y esa suma es correcta
+ * SOLO cuando el tablón no deja hueco en el eje del desplazamiento — pero
+ * si el tablón también reparte por ese eje (puede pasar sobre todo con el
+ * eje alterno, ver calcularGananciaCapiculado), el taco sigue bajando más
+ * allá del rastrel y la aproximación se queda corta: el palet de arriba
+ * quedaba "volando" un par de centímetros por encima de donde realmente
+ * apoya. La simulación de caída no asume qué capa es la que sujeta, así
+ * que vale igual haya o no hueco extra en el tablón (o en cualquier otra
+ * capa).
  *
  * Mismas condiciones de entrada que la unión de cubrir (apoyoType "tacos",
  * useCapiculado activo, no desmontada), más useRastreles activo — sin
- * rastrel no hay capa donde apoyar esta unión.
+ * rastrel no hay capa pensada para apoyar esta unión.
  */
-function calcularGananciaCapiculadoAlt(crateJson: unknown, desmontado: boolean): number | undefined {
+function calcularGananciaCapiculadoAlt(
+  crateJson: unknown,
+  desmontado: boolean,
+  desplazamientoMm: number,
+  desplazamientoEjeAncho: boolean
+): number | undefined {
   if (desmontado || crateJson == null || typeof crateJson !== "object") return undefined;
-  const cfg = crateJson as {
-    apoyoType?: unknown; useCapiculado?: unknown;
-    useRastreles?: unknown; rastrelAlto?: unknown; tacoAlto?: unknown;
-  };
+  const cfg = crateJson as { apoyoType?: unknown; useCapiculado?: unknown; useRastreles?: unknown };
   if (cfg.apoyoType !== "tacos" || cfg.useCapiculado !== true || cfg.useRastreles !== true) return undefined;
-  const rastrelAltoCm = typeof cfg.rastrelAlto === "number" ? cfg.rastrelAlto : Number(cfg.rastrelAlto);
-  const tacoAltoCm = typeof cfg.tacoAlto === "number" ? cfg.tacoAlto : Number(cfg.tacoAlto);
-  if (!Number.isFinite(rastrelAltoCm) || rastrelAltoCm <= 0) return undefined;
-  if (!Number.isFinite(tacoAltoCm) || tacoAltoCm <= 0) return undefined;
-  return Math.round((tacoAltoCm + rastrelAltoCm) * 10);
+
+  try {
+    const cfgCompleto = buildConfig(crateJson as Cfg);
+    const boxes = piezasABoxes(computePieces(cfgCompleto), cfgCompleto);
+    if (boxes.length === 0) return undefined;
+    const alturaCm = Math.max(...boxes.map((b) => b.y1));
+    if (!(alturaCm > 0)) return undefined;
+
+    const desplazamientoCm = desplazamientoMm / 10;
+    const dx = desplazamientoEjeAncho ? 0 : desplazamientoCm;
+    const dz = desplazamientoEjeAncho ? desplazamientoCm : 0;
+
+    // Nivel invertido: volteado en Y (respecto a su propio techo) y
+    // desplazado en el eje que haya tocado — mismo criterio que aplica
+    // scene3d.ts al dibujar un nivel capiculado.
+    const invertido = boxes.map((b) => ({
+      x0: b.x0 + dx, x1: b.x1 + dx,
+      y0: alturaCm - b.y1, y1: alturaCm - b.y0,
+      z0: b.z0 + dz, z1: b.z1 + dz,
+    }));
+
+    // Deja caer la geometría nativa (sin voltear, sin desplazar — el nivel
+    // de arriba, normal) sobre el nivel invertido: para cada pareja de
+    // piezas que se solapan en planta (X,Z), la altura mínima a la que
+    // puede apoyar la de arriba es el techo de la de abajo. El máximo de
+    // esas alturas, en toda la pieza, es donde de verdad topa primero.
+    let zApoyoCm = 0;
+    for (const sup of boxes) {
+      for (const inf of invertido) {
+        const ox = Math.min(sup.x1, inf.x1) - Math.max(sup.x0, inf.x0);
+        const oz = Math.min(sup.z1, inf.z1) - Math.max(sup.z0, inf.z0);
+        if (ox > 1e-6 && oz > 1e-6) {
+          const zNecesariaCm = inf.y1 - sup.y0;
+          if (zNecesariaCm > zApoyoCm) zApoyoCm = zNecesariaCm;
+        }
+      }
+    }
+    // Ganancia = lo que se ahorra respecto a apilar plano (que dejaría el
+    // nivel de arriba a alturaCm exactos por encima del invertido).
+    const gananciaCm = alturaCm - zApoyoCm;
+    if (!(gananciaCm > 0)) return undefined;
+    return Math.round(gananciaCm * 10);
+  } catch {
+    return undefined;
+  }
 }
 
 export interface DisposicionCarga {
@@ -290,9 +368,12 @@ export function crateReferenceAReference(
   cr: CrateReference,
   refs: Map<string, CrateReference>,
   geom: Map<string, unknown>,
-  /** Sustituye cr.unidadesPorPack para esta referencia (solo tiene efecto
-   * en tipo "carga") — deja personalizar cuántas unidades trae cada pack,
-   * en vez del número fijo que venía en el JSON exportado. */
+  /** Sustituye cr.unidadesPorPack para esta referencia — deja personalizar
+   * cuántas unidades trae cada pack, en vez del número fijo que venía en
+   * el JSON exportado. Aplica a CUALQUIER tipo (palet/caja/jaula, carga,
+   * foam): el usuario tiene que poder ajustar el flejado — y, por tanto,
+   * quitar/poner unidades individuales de una pila — para todas las
+   * referencias, no solo las de tipo "carga". */
   unidadesPorPackOverride?: number,
   /** Fuerza el nº de columnas en las que se reparten las unidades sobre el
    * palet (solo tipo "carga") en vez del cálculo automático por medidas. */
@@ -383,11 +464,31 @@ export function crateReferenceAReference(
   let largoMm = cr.desmontado?.largoMm ?? cr.largoMm;
   let anchoMm = cr.desmontado?.anchoMm ?? cr.anchoMm;
   const altoUnidadMm = cr.desmontado?.altoMm ?? cr.altoUnidadMm;
-  const packAltoMm = Math.round(altoUnidadMm * cr.unidadesPorPack);
+  // unidadesPorPackOverride también aplica aquí (antes solo tipo "carga" y
+  // "foam" lo leían): el usuario tiene que poder ajustar cuántas unidades
+  // sueltas forman un pack para CUALQUIER referencia, no solo las de carga
+  // — es lo que luego deja quitar/poner unidades individuales de la pila
+  // (cada pack se representa como un PalletInstance con tantas subunidades
+  // como unidadesPorPack, ver lotCalculator.ts y agruparEnPilas en
+  // packer.ts). Sin esto, cambiar el override no tenía ningún efecto en
+  // estas referencias: el pack se seguía formando con el número fijo del
+  // JSON, aunque el propio input de la UI mostrara otro valor.
+  const unidadesPorPack = unidadesPorPackOverride ?? cr.unidadesPorPack;
+  const packAltoMm = Math.round(altoUnidadMm * unidadesPorPack);
   const intercambiado = debeIntercambiarParaCamion(cr.crateJson);
   if (intercambiado) [largoMm, anchoMm] = [anchoMm, largoMm];
   const capiculado = calcularGananciaCapiculado(cr.crateJson, !!cr.desmontado);
-  const capiculadoAlt = calcularGananciaCapiculadoAlt(cr.crateJson, !!cr.desmontado);
+  // Si el rastrel reparte en un eje distinto al del cubrir Y además choca
+  // sin remedio con el taco en ESE eje (que nunca se desplaza, ver
+  // calcularGananciaCapiculado), la unión taco-rastrel no es segura para
+  // esta referencia — se desactiva del todo en vez de arriesgar una
+  // colisión real que no se ve reflejada en el hueco reservado. Se le pasa
+  // el eje/desplazamiento YA RESUELTOS (en el marco nativo, antes del
+  // intercambio por dobles bases de aquí abajo) para que la simulación de
+  // caída use exactamente el mismo desplazamiento que de verdad se aplica.
+  const capiculadoAlt = capiculado?.cabeUnionAlterna === false
+    ? undefined
+    : calcularGananciaCapiculadoAlt(cr.crateJson, !!cr.desmontado, capiculado?.desplazamientoMm ?? 0, capiculado?.desplazamientoEjeAncho ?? false);
   // desplazamientoCapiculadoEjeAncho viene calculado en el marco NATIVO de
   // la geometría (largo/ancho tal como se diseñó) — si además hubo que
   // intercambiar largo/ancho para el camión (dobles bases), ese mismo
@@ -398,7 +499,7 @@ export function crateReferenceAReference(
     : false;
   return {
     id: cr.id, sku: cr.sku, nombre: cr.nombre,
-    unidadesPorPalet: cr.unidadesPorPack, loteMinimo: 1,
+    unidadesPorPalet: unidadesPorPack, loteMinimo: 1,
     apilable: cr.apilable,
     palletType: {
       id: `pt-${cr.id}`, nombre: `Bulto ${cr.sku}`,

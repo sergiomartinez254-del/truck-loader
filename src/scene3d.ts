@@ -960,11 +960,21 @@ export function crearEscena3D(
       sd.truckY = dragCurrentTruckY;
       sd.enEspera = false;
       restaurarColorPila(potentialDrag);
-      for (const p of paletsMutable) {
-        if (sd.paletIds.includes(p.id)) {
-          p.x = dragCurrentTruckX; p.y = dragCurrentTruckY;
-          p.z = objetivo.nuevoZ; p.nivel = objetivo.nuevoNivel;
-        }
+      // sd.paletIds puede traer VARIOS palets (p.ej. 2 unidades de una
+      // referencia con pack de 1, ya apiladas entre sí antes de arrastrar
+      // el grupo entero) — hay que conservar su desnivel relativo (quién
+      // iba encima de quién dentro del propio grupo), no aplastarlos todos
+      // en el mismo z/nivel del objetivo. Antes se hacía p.z=objetivo.nuevoZ
+      // para TODOS sin distinción, así que la segunda unidad terminaba
+      // literalmente en el mismo sitio que la primera (superpuesta, oculta)
+      // en vez de encima de ella.
+      const paletsDelGrupo = paletsMutable.filter(p => sd.paletIds.includes(p.id));
+      const zBaseGrupo = Math.min(...paletsDelGrupo.map(p => p.z));
+      const nivelBaseGrupo = Math.min(...paletsDelGrupo.map(p => p.nivel));
+      for (const p of paletsDelGrupo) {
+        p.x = dragCurrentTruckX; p.y = dragCurrentTruckY;
+        p.z = objetivo.nuevoZ + (p.z - zBaseGrupo);
+        p.nivel = objetivo.nuevoNivel + (p.nivel - nivelBaseGrupo);
       }
       onApilarManual?.(sd.paletIds, objetivo.paletId, objetivo.nuevoZ, objetivo.nuevoNivel);
       emitirSeleccion(potentialDrag);
@@ -1058,7 +1068,16 @@ export function crearEscena3D(
 
       if (dragHasCollision && !sd.bloqueado) {
         const objetivo = buscarObjetivoApilado(excluir, snX, snY, sd.anchoMm, sd.largoMm);
-        if (objetivo && objetivo.refId !== sd.refId && onComprobarApilableManual?.(sd.refId, objetivo.refId)) {
+        // Antes se exigía objetivo.refId !== sd.refId aquí, bloqueando de
+        // raíz que una segunda unidad de una referencia aterrizara encima
+        // de otra unidad de la MISMA referencia si esa columna ya mezclaba
+        // otra referencia debajo (p.ej. base de otra referencia + 2
+        // unidades de esta) — el apilado manual nunca llegaba a ofrecerse
+        // como opción, así que la segunda unidad se quedaba fuera de la
+        // columna. Ahora lo decide solo onComprobarApilableManual, que ya
+        // sabe distinguir "misma referencia" (mira su propio flag
+        // apilable) de "referencias distintas" (mira la lista cruzada).
+        if (objetivo && onComprobarApilableManual?.(sd.refId, objetivo.refId)) {
           const alturaTrasApilar = objetivo.nuevoZ + sd.alturaTotal;
           // La de arriba solo puede sobresalir en UN eje (largo o ancho),
           // nunca en los dos a la vez.

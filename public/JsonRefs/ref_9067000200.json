@@ -23,6 +23,7 @@
     "dimMode": "interior",
     "apoyoType": "tacos",
     "dbOrient": "ancho",
+    "useCapiculado": true,
     "dobleBaseAncho": 7,
     "dobleBaseAlto": 10,
     "claroMax": 50,

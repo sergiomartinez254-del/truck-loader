@@ -53,7 +53,7 @@ function colorDe(id: string): string {
 let truckProfile: TruckProfile = {
   ...DEFAULT_TRUCK_PROFILE,
   nombre: "Camión estándar",
-  largoInteriorMm: 12000, anchoInteriorMm: 2400, altoInteriorMm: 2400,
+  largoInteriorMm: 13600, anchoInteriorMm: 2450, altoInteriorMm: 2630,
 };
 let permitirVarios = false;
 let resultado: LoadPlanResult | null = null;
@@ -98,8 +98,25 @@ let stagedStacks: StagedStack[] = [];
 // a arrastrar una pila sobre otra ya puesta — el packer automático sigue
 // apilando únicamente unidades de la misma referencia, como hasta ahora.
 let apilableSobre: Record<string, string[]> = {};
+// Estado del picker de reglas "con clics": la referencia fijada como
+// ARRIBA a la espera de que el usuario seleccione la de ABAJO. Vive fuera
+// de cualquier pila concreta — sigue en pie aunque el usuario deseleccione
+// y seleccione otra pila de la MISMA referencia para completar la regla.
+let apilableClicArriba: { id: string; sku: string } | null = null;
 function puedeApilarManual(refArriba: string, refAbajo: string): boolean {
-  if (refArriba === refAbajo) return false; // eso ya lo decide "apilable" + el packer automático
+  if (refArriba === refAbajo) {
+    // Apilar a mano una unidad de una referencia sobre OTRA unidad de la
+    // MISMA referencia (p.ej. dentro de una columna mixta: base de otra
+    // referencia + 2 unidades de esta encima) lo decide el propio flag
+    // "apilable" de la referencia, no la lista cruzada de más abajo (que
+    // es para PAREJAS de referencias distintas). Antes se bloqueaba sin
+    // más — pensado para que el packer automático fuera el único que
+    // apilase una referencia sobre sí misma — pero eso deja fuera el caso
+    // real de construir una columna mixta a mano donde, en algún nivel,
+    // se repite la referencia: la segunda unidad nunca encontraba hueco
+    // para aterrizar.
+    return catalogoCompleto().find(r => r.id === refArriba)?.apilable ?? false;
+  }
   return (apilableSobre[refArriba] ?? []).includes(refAbajo);
 }
 
@@ -139,6 +156,10 @@ document.getElementById("app")!.innerHTML = `
       <!-- Pedido -->
       <div class="panel" id="panel-pedido">
         <h2>Pedido</h2>
+        <label class="field field--wide" style="margin-bottom:8px;">
+          <span>Buscar</span>
+          <input type="text" id="order-buscar" placeholder="Filtra por SKU o nombre..." autocomplete="off"/>
+        </label>
         <div id="order-rows"></div>
         <p class="auto-hint">Cada salto equivale a un palet completo. El plano se recalcula automáticamente.</p>
       </div>
@@ -200,6 +221,8 @@ document.getElementById("app")!.innerHTML = `
       <div class="panel">
         <h2>Apilado manual entre referencias</h2>
         <p class="auto-hint">Declara qué referencia se puede arrastrar encima de cuál (no afecta al cálculo automático, solo a cuando arrastras una pila sobre otra ya puesta).</p>
+        <p class="auto-hint">También puedes hacerlo con clics: selecciona una pila en el plano y usa los botones "Usar como arriba" / "Puede ir sobre esta" de su panel de info.</p>
+        <div id="apilable-clic-estado"></div>
         <div class="custom-ref-row">
           <label class="field field--wide"><span>Arriba</span><input type="text" id="ap-arriba" list="ap-arriba-lista" placeholder="Busca por SKU o nombre..." autocomplete="off"/><datalist id="ap-arriba-lista"></datalist></label>
           <label class="field field--wide"><span>Puede ir sobre</span><input type="text" id="ap-abajo" list="ap-abajo-lista" placeholder="Busca por SKU o nombre..." autocomplete="off"/><datalist id="ap-abajo-lista"></datalist></label>
@@ -250,6 +273,7 @@ document.getElementById("app")!.innerHTML = `
 
 // ── Refs a nodos clave ───────────────────────────────────────────
 const orderRowsEl = document.getElementById("order-rows")!;
+const orderBuscarEl = document.getElementById("order-buscar") as HTMLInputElement;
 const avisosLoteEl = document.getElementById("avisos-lote")!;
 const resultsAreaEl = document.getElementById("results-area")!;
 const metaEl = document.getElementById("meta")!;
@@ -411,7 +435,17 @@ function renderOrderRows() {
     }
   }
 
-  orderRowsEl.innerHTML = catalogoCompleto().map(ref => {
+  // Filtro de texto (SKU o nombre, sin distinguir mayúsculas/acentos) — con
+  // 30+ referencias cargadas, encontrar una a golpe de scroll se hace
+  // cuesta arriba. Las filas que no coinciden simplemente no se pintan
+  // (los datos y las cantidades siguen intactos, solo se oculta la fila).
+  const normaliza = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const filtro = normaliza(orderBuscarEl?.value ?? "");
+  const catalogoFiltrado = filtro
+    ? catalogoCompleto().filter(r => normaliza(r.sku).includes(filtro) || normaliza(r.nombre).includes(filtro))
+    : catalogoCompleto();
+
+  orderRowsEl.innerHTML = catalogoFiltrado.map(ref => {
     const locked = lockedByRef.get(ref.id) ?? 0;
     const minVal  = locked > 0 ? locked : 0;
     // Si el valor actual es inferior al mínimo bloqueado, clampear hacia arriba
@@ -442,7 +476,9 @@ function renderOrderRows() {
         <input type="number" min="${minVal}" step="${ref.unidadesPorPalet}" data-ref="${ref.id}" value="${v}"/>
         ${esCustom ? `<button class="btn-remove-ref" data-remove="${ref.id}" title="Eliminar">×</button>` : "<span></span>"}
       </div>`;
-  }).join("");
+  }).join("") || (filtro
+    ? `<p class="auto-hint">Ninguna referencia coincide con "${orderBuscarEl.value}".</p>`
+    : `<p class="auto-hint">Todavía no hay referencias cargadas.</p>`);
 
   orderRowsEl.querySelectorAll<HTMLInputElement>("input[data-override-unidades]").forEach(inp => {
     inp.addEventListener("change", () => {
@@ -507,6 +543,24 @@ function renderOrderRows() {
 // poder filtrar por cualquiera de los dos) → id de la referencia.
 const apilableBusquedaAId = new Map<string, string>();
 
+/** Pinta el aviso de "arriba fijada, esperando a que selecciones abajo"
+ * del picker de reglas con clics. Se llama tanto al fijar/cancelar una
+ * referencia como al repintar el panel de apilado en general. */
+function renderApilableClicEstado() {
+  const el = document.getElementById("apilable-clic-estado");
+  if (!el) return;
+  if (!apilableClicArriba) { el.innerHTML = ""; return; }
+  el.innerHTML = `
+    <div class="auto-hint" style="display:flex; align-items:center; justify-content:space-between; gap:8px; background:var(--input-bg); border:1px solid var(--border); border-radius:6px; padding:6px 8px;">
+      <span>📌 Arriba fijada: <strong>${apilableClicArriba.sku}</strong> — selecciona otra pila en el plano y pulsa "Puede ir sobre esta".</span>
+      <button id="btn-apilable-clic-cancelar" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:11px; flex-shrink:0;">cancelar</button>
+    </div>`;
+  document.getElementById("btn-apilable-clic-cancelar")?.addEventListener("click", () => {
+    apilableClicArriba = null;
+    renderApilableClicEstado();
+  });
+}
+
 function renderApilamientoPanel() {
   const catalogo = catalogoCompleto();
   const datalistArriba = document.getElementById("ap-arriba-lista") as HTMLDataListElement;
@@ -552,6 +606,7 @@ function renderApilamientoPanel() {
       guardarEstadoDebounced();
     });
   });
+  renderApilableClicEstado();
 }
 document.getElementById("btn-add-apilable")!.addEventListener("click", () => {
   const inputArriba = document.getElementById("ap-arriba") as HTMLInputElement;
@@ -571,6 +626,7 @@ document.getElementById("btn-add-apilable")!.addEventListener("click", () => {
     guardarEstadoDebounced();
   }
 });
+orderBuscarEl.addEventListener("input", () => renderOrderRows());
 renderOrderRows();
 
 // ============================================================================
@@ -1090,9 +1146,33 @@ function actualizarCamionActivo(mantenerSeleccion = false) {
             ` : ""}
           </div>
         ` : ""}
+        <div class="palet-info__actions">
+          <button class="palet-info__btn ${apilableClicArriba?.id === info.refId ? "palet-info__btn--activo" : ""}" id="btn-apilable-arriba" title="Marca esta referencia como la que va ARRIBA para una regla de apilado manual">📌 Usar como arriba</button>
+          ${apilableClicArriba && apilableClicArriba.id !== info.refId ? `
+            <button class="palet-info__btn" id="btn-apilable-abajo" title="Crea la regla: ${apilableClicArriba.sku} puede ir sobre ${ref?.sku ?? info.refId}">📌 Puede ir sobre esta</button>
+          ` : ""}
+        </div>
       `;
       document.getElementById("btn-rotar-pila")?.addEventListener("click", () => rotarPila(info));
       document.getElementById("btn-lock-pila")?.addEventListener("click", () => toggleBloqueoPila(info));
+      document.getElementById("btn-apilable-arriba")?.addEventListener("click", () => {
+        apilableClicArriba = { id: info.refId, sku: ref?.sku ?? info.refId };
+        opciones.onSeleccion?.(info);
+        renderApilableClicEstado();
+      });
+      document.getElementById("btn-apilable-abajo")?.addEventListener("click", () => {
+        if (!apilableClicArriba || apilableClicArriba.id === info.refId) return;
+        const arriba = apilableClicArriba.id;
+        const abajo = info.refId;
+        const actuales = apilableSobre[arriba] ?? [];
+        if (!actuales.includes(abajo)) {
+          apilableSobre = { ...apilableSobre, [arriba]: [...actuales, abajo] };
+          guardarEstadoDebounced();
+        }
+        apilableClicArriba = null;
+        renderApilamientoPanel();
+        opciones.onSeleccion?.(info);
+      });
     },
 
     onMoverCamion(paletIds, nuevaX, nuevaY) {
