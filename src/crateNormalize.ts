@@ -28,9 +28,10 @@ export interface CajaAABB {
    * válido una vez reposicionada como panel plano).
    */
   rot?: { axis: "x" | "z"; angle: number; cx: number; cy: number; cz: number; w: number; h: number; d: number };
-  /** Presente SOLO en barrotes sueltos: a qué cara está asociado (o null si
-   * es libre), para poder decidir en el desmontado si se queda con la base
-   * o se excluye (si está en lado/testero/tapa). */
+  /** Presente SOLO en barrotes sueltos: a qué cara estaba asociado en el
+   * constructor (o null si es libre) — puramente informativo aquí, ya no
+   * se usa para decidir nada en el desmontado (ver esInmovilizado: todo
+   * barrote/barrote-ref/puntal va a su propia fila, sin mirar esto). */
   attachedTo?: string | null;
 }
 
@@ -218,24 +219,18 @@ const TESTERO_LAYERS = new Set(["testero-plancha", "testero-tabla", "llap-tester
 const TAPA_LAYERS = new Set(["tapa-plancha", "tapa-tabla", "llap-tapa", "rec-tapa", "cuadradillo"]);
 
 /**
- * Puntales y barrotes de refuerzo son postes/tablas verticales que suben
- * desde la base casi hasta la tapa — no "pertenecen" limpiamente a un único
- * panel plano al desmontar (no se tumban bien: son largos y finos, no
- * anchos y delgados como una pared). Para no inflar por error la altura de
- * la base (el mismo bug que tenían las llapasas), se excluyen del dibujo en
- * modo desmontado en vez de dejarlos mal clasificados.
- *
- * Los barrotes sueltos (añadidos a mano) se tratan igual, pero solo cuando
- * están asociados a lado/testero/tapa: no viajan con su pared (de momento,
- * eso queda para más adelante). Los asociados a la base (o libres, sin
- * asociar) SÍ cuentan — se quedan con la base sin más, como cualquier otra
- * pieza de la base, sin necesitar ningún caso especial aquí.
+ * Barrotes sueltos, barrotes de refuerzo y puntales son calzos para
+ * inmovilizar la mercancía dentro de la caja — no son parte estructural de
+ * ningún lado/testero/tapa (aunque un barrote suelto pueda llevar un
+ * `attachedTo` informativo). En modo desmontado no tiene sentido pegarlos
+ * a ningún panel en concreto: van todos juntos en su propia fila compacta,
+ * tumbados sobre su cara más ancha (ver dimensionesTumbadas más abajo).
+ * Mismo criterio que `esPiezaInmovilizado`/`caraDePieza` en el constructor
+ * (App.jsx) — antes se excluían del todo (ver el histórico de este
+ * fichero), ahora se colocan de verdad.
  */
-const IGNORAR_LAYERS = new Set(["puntal", "barrote-ref"]);
-function ignorarEnDesmontado(b: CajaAABB): boolean {
-  if (IGNORAR_LAYERS.has(b.layer)) return true;
-  if (b.layer === "barrote") return b.attachedTo === "lado" || b.attachedTo === "testero" || b.attachedTo === "tapa";
-  return false;
+function esInmovilizado(b: CajaAABB): boolean {
+  return b.layer === "puntal" || b.layer === "barrote-ref" || b.layer === "barrote";
 }
 
 /** El id de cada pieza lleva el índice de cara justo detrás ("lado-0",
@@ -245,6 +240,22 @@ function ignorarEnDesmontado(b: CajaAABB): boolean {
 function parteLadoTestero(id: string): number | null {
   const m = /(?:lado|testero)-(\d)/.exec(id);
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * Dimensiones (w horizontal, h vertical, d horizontal) de una pieza suelta
+ * (barrote, puntal) tumbada sobre su cara MÁS ANCHA — la dimensión MENOR
+ * de las tres pasa a ser el alto (h), no da igual cuál de las otras dos
+ * quede de canto. Mismo criterio, mismos tres casos, que `tumbarSiHaceFalta`
+ * en el constructor (App.jsx) — aquí no hay malla que rotar de verdad, solo
+ * hace falta la caja ya reorientada, así que basta con reasignar qué
+ * dimensión original va a cada eje de salida.
+ */
+function dimensionesTumbadas(b: CajaAABB): { w: number; h: number; d: number } {
+  const w0 = b.x1 - b.x0, h0 = b.y1 - b.y0, d0 = b.z1 - b.z0;
+  if (w0 <= h0 && w0 <= d0) return { w: h0, h: w0, d: d0 };
+  if (d0 <= h0 && d0 <= w0) return { w: w0, h: d0, d: h0 };
+  return { w: w0, h: h0, d: d0 };
 }
 
 interface RangoBox {
@@ -262,10 +273,11 @@ function rangoDe(boxes: CajaAABB[]): RangoBox | null {
   return { minX, maxX, minY, maxY, minZ, maxZ };
 }
 
-// LIMITACIÓN: puntales, barrotes de refuerzo, y barrotes sueltos asociados a
-// lado/testero/tapa no se dibujan en modo desmontado (ver
-// ignorarEnDesmontado más arriba) — el resto de piezas estructurales
-// (paredes con sus llapasas/recuadros, tapa, base, barrotes de base) sí.
+// Los barrotes sueltos, barrotes de refuerzo y puntales no van pegados a
+// ningún lado/testero (son calzos para inmovilizar la mercancía, no parte
+// de la caja): se agrupan todos juntos en su propia fila compacta,
+// tumbados sobre su cara más ancha, encima de todo lo demás (ver
+// esInmovilizado/dimensionesTumbadas más arriba).
 //
 // OPTIMIZACIÓN DE ALTURA: los 2 lados SIEMPRE se apilan uno encima del otro
 // (misma huella, son el mismo panel por duplicado) — igual los 2 testeros
@@ -276,7 +288,7 @@ function rangoDe(boxes: CajaAABB[]): RangoBox | null {
 // eso NO hace crecer la huella que ya establece la base/tapa. Si no caben
 // juntos, cada bloque va en su propia capa.
 export function desmontarBoxes(boxesOriginales: CajaAABB[]): CajaAABB[] {
-  const boxes = boxesOriginales.filter(b => !ignorarEnDesmontado(b));
+  const boxes = boxesOriginales.filter(b => !esInmovilizado(b));
   const esLado = (b: CajaAABB) => LADO_LAYERS.has(b.layer);
   const esTestero = (b: CajaAABB) => TESTERO_LAYERS.has(b.layer);
   const esTapa = (b: CajaAABB) => TAPA_LAYERS.has(b.layer);
@@ -398,6 +410,32 @@ export function desmontarBoxes(boxesOriginales: CajaAABB[]): CajaAABB[] {
     colocar(bloqueLado, stackY); stackY += bloqueLado.grosor;
   } else if (bloqueTestero) {
     colocar(bloqueTestero, stackY); stackY += bloqueTestero.grosor;
+  }
+
+  // Barrotes sueltos, barrotes de refuerzo y puntales: van todos juntos en
+  // una única fila compacta encima de todo lo demás — se tumban sobre su
+  // cara más ancha (dimensionesTumbadas) y se reparten en planta uno junto
+  // a otro (estantería simple: de izquierda a derecha, saltando de fila
+  // dentro de la misma capa cuando no cabe más a lo largo) para no sumar
+  // más altura de la que hace falta. Mismo criterio que
+  // aplicarVistaDesmontada en el constructor (App.jsx).
+  const piezasInmovilizado = boxesOriginales.filter(esInmovilizado);
+  if (piezasInmovilizado.length) {
+    let curX = 0, curZ = 0, filaProfundidad = 0, capaGrosor = 0;
+    for (const b of piezasInmovilizado) {
+      const { w, h, d } = dimensionesTumbadas(b);
+      if (curX > 0 && curX + w > largoBase) { curX = 0; curZ += filaProfundidad; filaProfundidad = 0; }
+      resultado.push({
+        layer: b.layer, id: b.id,
+        x0: rangoBase.minX + curX, x1: rangoBase.minX + curX + w,
+        y0: stackY, y1: stackY + h,
+        z0: rangoBase.minZ + curZ, z1: rangoBase.minZ + curZ + d,
+      });
+      curX += w;
+      filaProfundidad = Math.max(filaProfundidad, d);
+      capaGrosor = Math.max(capaGrosor, h);
+    }
+    stackY += capaGrosor;
   }
 
   return resultado;

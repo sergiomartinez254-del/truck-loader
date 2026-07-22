@@ -228,6 +228,7 @@ export function buildConfig(s: Cfg): Cfg {
     useTesteros, testeroCubrirType, testeroGrosor, testeroTablaAncho: g(s.testeroTablaAncho, 10), testeroSeparacion: g(s.testeroSeparacion, 15),
     useTapa, tapaCubrirType: g(s.tapaCubrirType, "contrachapado"), tapaGrosor: g(s.tapaGrosor, 0.9),
     tapaTablaAncho: g(s.tapaTablaAncho, 10), tapaSeparacion: g(s.tapaSeparacion, 15), tapaCubrirOrient: g(s.tapaCubrirOrient, "largo"),
+    useSolapaTapa: g(s.useSolapaTapa, false), solapaTapaCm: g(s.solapaTapaCm, 15),
     caraDominante: g(s.caraDominante, "lado"),
     ...((): { cargamentoCubrir: string; cargamentoLlap: string } => {
       // Compatibilidad con JSON exportados antes de separar "cargamento" en
@@ -284,6 +285,7 @@ export function computePieces(cfg: Cfg): Piece[] {
     useLados, ladoCubrirType, ladoGrosor, ladoTablaAncho, ladoSeparacion,
     useTesteros, testeroCubrirType, testeroGrosor, testeroTablaAncho, testeroSeparacion,
     useTapa, tapaCubrirType, tapaGrosor, tapaTablaAncho, tapaSeparacion, tapaCubrirOrient,
+    useSolapaTapa, solapaTapaCm,
     caraDominante, cargamentoCubrir, cargamentoLlap, apoyoLado, apoyoTestero,
     apoyoLadoLlap, apoyoTesteroLlap, apoyoLadoLlapIncl, apoyoTesteroLlapIncl,
     useLlapasasLado, llapLadoOrient, llapLadoAncho, llapLadoGrosor, llapLadoClaro, llapLadoPosicion, useLlapInclinadaLado, useRecuadrosLado, recuadroLadoClaro,
@@ -857,10 +859,15 @@ export function computePieces(cfg: Cfg): Piece[] {
 
   if (useTapa) {
     const tapaY = cubrirTopY + alto;
-    const tStartX = fullStartX + tapaCutX;
-    const tStartZ = fullStartZ + tapaCutZ;
-    const tLargo = fullLargo - 2 * tapaCutX;
-    const tAncho = fullAncho - 2 * tapaCutZ;
+    // Solapa: el cubrir de la tapa vuela más allá del marco de llapasas
+    // (construcciones de cartón: llapasas de madera + cubrir de cartón
+    // sobredimensionado). Las llapasas de tapa no se mueven. 15cm por
+    // borde por defecto, no repartido (a diferencia de sabanaExtra).
+    const solapa = useSolapaTapa ? solapaTapaCm : 0;
+    const tStartX = fullStartX + tapaCutX - solapa;
+    const tStartZ = fullStartZ + tapaCutZ - solapa;
+    const tLargo = fullLargo - 2 * tapaCutX + 2 * solapa;
+    const tAncho = fullAncho - 2 * tapaCutZ + 2 * solapa;
 
     if (tapaCubrirType === "contrachapado") {
       const id = "tapa"; const ov = overrides[id] || {};
@@ -1169,9 +1176,13 @@ export function computePieces(cfg: Cfg): Piece[] {
       for (let r = 0; r < rPos.length; r++) {
         const id = `rec-tapa-${gg}-${r}`; const ov = overrides[id] || {};
         if (isAlongLargoT) {
-          pieces.push({ id, layer: "rec-tapa", x: recStartX + rPos[r] - llapTapaAncho / 2, z: recStartZ + gapStart, y: recYBase, w: ov.ancho ?? llapTapaAncho, h: llapTapaGrosor, d: ov.largo ?? gapLen });
+          const xDef = recStartX + rPos[r] - llapTapaAncho / 2, zDef = recStartZ + gapStart;
+          const posX = ov.posX ?? xDef, posZ = ov.posZ ?? zDef;
+          pieces.push({ id, layer: "rec-tapa", orient: "largo", x: posX, z: posZ, y: recYBase, posX, posZ, w: ov.ancho ?? llapTapaAncho, h: llapTapaGrosor, d: ov.largo ?? gapLen });
         } else {
-          pieces.push({ id, layer: "rec-tapa", x: recStartX + gapStart, z: recStartZ + rPos[r] - llapTapaAncho / 2, y: recYBase, w: ov.largo ?? gapLen, h: llapTapaGrosor, d: ov.ancho ?? llapTapaAncho });
+          const xDef = recStartX + gapStart, zDef = recStartZ + rPos[r] - llapTapaAncho / 2;
+          const posX = ov.posX ?? xDef, posZ = ov.posZ ?? zDef;
+          pieces.push({ id, layer: "rec-tapa", orient: "ancho", x: posX, z: posZ, y: recYBase, posX, posZ, w: ov.largo ?? gapLen, h: llapTapaGrosor, d: ov.ancho ?? llapTapaAncho });
         }
       }
     }
@@ -1199,11 +1210,13 @@ export function computePieces(cfg: Cfg): Piece[] {
       if (isAlongLargo) {
         const anchoPieza = ov.ancho ?? llapTapaAncho;
         const center = ov.center ?? (tapaLlapStartZ + llapPos[j]);
-        pieces.push({ id, layer: "llap-tapa", index: j, x: tapaLlapStartX, z: center - anchoPieza / 2, y: llapYBase, center, w: ov.largo ?? tapaLlapRunDim, h: ov.grosor ?? llapTapaGrosor, d: anchoPieza });
+        const posX = ov.posX ?? tapaLlapStartX;
+        pieces.push({ id, layer: "llap-tapa", index: j, x: posX, z: center - anchoPieza / 2, y: llapYBase, center, posX, w: ov.largo ?? tapaLlapRunDim, h: ov.grosor ?? llapTapaGrosor, d: anchoPieza });
       } else {
         const anchoPieza = ov.ancho ?? llapTapaAncho;
         const center = ov.center ?? (tapaLlapStartX + llapPos[j]);
-        pieces.push({ id, layer: "llap-tapa", index: j, x: center - anchoPieza / 2, z: tapaLlapStartZ, y: llapYBase, center, w: anchoPieza, h: ov.grosor ?? llapTapaGrosor, d: ov.largo ?? tapaLlapRunDim });
+        const posZ = ov.posZ ?? tapaLlapStartZ;
+        pieces.push({ id, layer: "llap-tapa", index: j, x: center - anchoPieza / 2, z: posZ, y: llapYBase, center, posZ, w: anchoPieza, h: ov.grosor ?? llapTapaGrosor, d: ov.largo ?? tapaLlapRunDim });
       }
     }
   }

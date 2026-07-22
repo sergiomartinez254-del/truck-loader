@@ -53,7 +53,7 @@ function colorDe(id: string): string {
 let truckProfile: TruckProfile = {
   ...DEFAULT_TRUCK_PROFILE,
   nombre: "Camión estándar",
-  largoInteriorMm: 13600, anchoInteriorMm: 2450, altoInteriorMm: 2630,
+  largoInteriorMm: 12000, anchoInteriorMm: 2400, altoInteriorMm: 2400,
 };
 let permitirVarios = false;
 let resultado: LoadPlanResult | null = null;
@@ -437,15 +437,18 @@ function renderOrderRows() {
 
   // Filtro de texto (SKU o nombre, sin distinguir mayúsculas/acentos) — con
   // 30+ referencias cargadas, encontrar una a golpe de scroll se hace
-  // cuesta arriba. Las filas que no coinciden simplemente no se pintan
-  // (los datos y las cantidades siguen intactos, solo se oculta la fila).
+  // cuesta arriba. IMPORTANTE: las filas que no coinciden se OCULTAN con
+  // CSS, nunca se quitan del HTML — getCantidades() lee las cantidades
+  // directamente de los <input> de este contenedor, así que si una fila se
+  // deja de pintar, esa referencia desaparece del pedido de verdad (y por
+  // tanto también del camión). El filtro es solo para buscar, no para
+  // decidir qué se carga.
   const normaliza = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const filtro = normaliza(orderBuscarEl?.value ?? "");
-  const catalogoFiltrado = filtro
-    ? catalogoCompleto().filter(r => normaliza(r.sku).includes(filtro) || normaliza(r.nombre).includes(filtro))
-    : catalogoCompleto();
+  const coincide = (ref: Reference) => !filtro || normaliza(ref.sku).includes(filtro) || normaliza(ref.nombre).includes(filtro);
+  const catalogo = catalogoCompleto();
 
-  orderRowsEl.innerHTML = catalogoFiltrado.map(ref => {
+  orderRowsEl.innerHTML = catalogo.map(ref => {
     const locked = lockedByRef.get(ref.id) ?? 0;
     const minVal  = locked > 0 ? locked : 0;
     // Si el valor actual es inferior al mínimo bloqueado, clampear hacia arriba
@@ -455,7 +458,7 @@ function renderOrderRows() {
     const esDesmontado = crateInfoPorRef.get(ref.id)?.esDesmontado;
     const esCarga = crateInfoPorRef.get(ref.id)?.tipo === "carga";
     return `
-      <div class="order-row" data-refid="${ref.id}">
+      <div class="order-row" data-refid="${ref.id}" ${coincide(ref) ? "" : 'style="display:none"'}>
         <div class="order-row__color" style="background:${colorDe(ref.id)}"></div>
         <div class="order-row__info">
           <span class="order-row__sku">${ref.sku}${locked > 0 ? ` <span class="lock-badge" title="${locked} ud fijadas">🔒</span>` : ""}${esDesmontado ? ` <span class="lock-badge" title="Se transporta desmontada (paneles planos)">📦</span>` : ""}</span>
@@ -476,9 +479,11 @@ function renderOrderRows() {
         <input type="number" min="${minVal}" step="${ref.unidadesPorPalet}" data-ref="${ref.id}" value="${v}"/>
         ${esCustom ? `<button class="btn-remove-ref" data-remove="${ref.id}" title="Eliminar">×</button>` : "<span></span>"}
       </div>`;
-  }).join("") || (filtro
-    ? `<p class="auto-hint">Ninguna referencia coincide con "${orderBuscarEl.value}".</p>`
-    : `<p class="auto-hint">Todavía no hay referencias cargadas.</p>`);
+  }).join("") + (
+    catalogo.length === 0
+      ? `<p class="auto-hint">Todavía no hay referencias cargadas.</p>`
+      : catalogo.some(coincide) ? "" : `<p class="auto-hint">Ninguna referencia coincide con "${orderBuscarEl.value}".</p>`
+  );
 
   orderRowsEl.querySelectorAll<HTMLInputElement>("input[data-override-unidades]").forEach(inp => {
     inp.addEventListener("change", () => {
