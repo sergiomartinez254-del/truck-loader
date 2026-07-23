@@ -3,7 +3,7 @@ import type { Reference } from "./types";
 import { SIN_LIMITE_PESO_KG } from "./types";
 import { bboxNativoCrate } from "./crateMeshes";
 import { buildConfig, computePieces, type Cfg } from "./crateGeometry";
-import { piezasABoxes, type CajaAABB } from "./crateNormalize";
+import { piezasABoxes } from "./crateNormalize";
 
 /**
  * Una base de dobles bases (rastreles cruzados) solo se puede levantar con

@@ -1,0 +1,1 @@
+{"root":["./src/api.ts","./src/crateadapter.ts","./src/crateapi.ts","./src/crategeometry.ts","./src/cratemeshes.ts","./src/cratenormalize.ts","./src/cratepacker.ts","./src/cratetoreference.ts","./src/cratetypes.ts","./src/index.ts","./src/lotcalculator.ts","./src/main.ts","./src/packer.ts","./src/scene3d.ts","./src/types.ts"],"version":"5.9.3"}
